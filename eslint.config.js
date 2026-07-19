@@ -13,5 +13,17 @@ export default tseslint.config(
       'no-console': 'error',
     },
   },
-  { ignores: ['dist/', 'coverage/', 'node_modules/', '*.config.js', '*.config.ts'] },
+  // Scripts k6 (runtime Goja) e bootstrap do mongosh rodam fora do Node e fora do projeto
+  // TypeScript — não podem ser analisados pelas regras type-checked.
+  {
+    ignores: [
+      'dist/',
+      'coverage/',
+      'node_modules/',
+      'tests/performance/k6/',
+      'infra/',
+      '*.config.js',
+      '*.config.ts',
+    ],
+  },
 );

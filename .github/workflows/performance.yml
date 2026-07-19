@@ -11,11 +11,10 @@ jobs:
     services:
       postgres:
         image: postgres:17-alpine
-        env: { POSTGRES_USER: iam, POSTGRES_PASSWORD: iam_test, POSTGRES_DB: iam_test }
+        env: { POSTGRES_USER: iam, POSTGRES_HOST_AUTH_METHOD: trust, POSTGRES_DB: iam_test }
         ports: ['5432:5432']
       mongodb:
         image: mongo:8
-        env: { MONGO_INITDB_ROOT_USERNAME: iam, MONGO_INITDB_ROOT_PASSWORD: iam_test }
         ports: ['27017:27017']
     steps:
       - uses: actions/checkout@v6
@@ -25,8 +24,8 @@ jobs:
       - run: pnpm install --frozen-lockfile && pnpm build
       - name: Subir API e rodar cenários k6
         env:
-          POSTGRES_URL: postgresql://iam:iam_test@localhost:5432/iam_test
-          MONGODB_URL: mongodb://iam:iam_test@localhost:27017
+          POSTGRES_URL: postgresql://iam@localhost:5432/iam_test
+          MONGODB_URL: mongodb://localhost:27017
         run: |
           pnpm migrate && pnpm seed
           node dist/server.js & sleep 3
