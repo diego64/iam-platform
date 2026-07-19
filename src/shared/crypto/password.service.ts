@@ -7,8 +7,6 @@
  *  - Exportar HASH_FANTASMA para equalizar timing quando o usuário não existe (SPEC 001)
  *  - Parâmetros vindos de env (SCRYPT_COST, SCRYPT_BLOCK_SIZE, SCRYPT_PARALLELIZATION)
  */
-import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
-
 export interface ServicoDeSenha {
   gerarHash(senha: string): Promise<string>;
   verificar(senha: string, hashArmazenado: string): Promise<boolean>;

@@ -2,6 +2,9 @@ openapi: 3.1.0
 info:
   title: Custom IAM API
   version: 0.1.0
+  contact:
+    name: iam-platform
+    url: https://github.com/diego64/iam-platform
   description: >
     Provedor de Identidade (IdP/SSO). Emissão e validação de tokens para microsserviços.
     Autenticação via Bearer Token (JWT EdDSA) e fluxos OAuth2 (password, client_credentials, refresh_token).

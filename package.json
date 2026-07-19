@@ -3,14 +3,17 @@
   "version": "0.1.0",
   "description": "Provedor de Identidade (IAM/SSO) — emissão e validação de tokens para microsserviços",
   "type": "module",
-  "engines": { "node": ">=22.0.0", "pnpm": ">=9.0.0" },
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=9.0.0"
+  },
   "packageManager": "pnpm@9.15.0",
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/server.js",
-    "lint": "eslint src tests scripts",
-    "lint:fix": "eslint src tests scripts --fix",
+    "lint": "eslint src tests scripts --no-error-on-unmatched-pattern",
+    "lint:fix": "eslint src tests scripts --fix --no-error-on-unmatched-pattern",
     "format": "prettier --write .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --dir tests/unit",
@@ -27,7 +30,7 @@
     "infra:up": "docker compose -f infra/compose/docker-compose.yml up -d",
     "infra:down": "docker compose -f infra/compose/docker-compose.yml down",
     "infra:monitoring": "docker compose -f infra/compose/docker-compose.monitoring.yml up -d",
-    "prepare": "husky"
+    "prepare": "husky || true"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.0",

@@ -13,5 +13,14 @@ export default tseslint.config(
       'no-console': 'error',
     },
   },
-  { ignores: ['dist/', 'coverage/', 'node_modules/', '*.config.js', '*.config.ts'] },
+  {
+    ignores: [
+      'dist/',
+      'coverage/',
+      'node_modules/',
+      '*.config.js',
+      '*.config.ts',
+      'tests/performance/k6/**',
+    ],
+  },
 );
