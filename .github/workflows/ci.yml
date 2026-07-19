@@ -264,7 +264,7 @@ jobs:
     needs: [quality-gate]
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/download-artifact@v6
+      - uses: actions/download-artifact@v8
         with: { name: docker-image, path: /tmp }
       - run: docker load -i /tmp/image.tar
       - name: Trivy — quebra o build acima de MEDIUM
