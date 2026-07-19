@@ -7,7 +7,7 @@ import { carregarEnv } from './config/env.js';
 
 async function iniciar(): Promise<void> {
   const env = carregarEnv();
-  const app = await construirApp();
+  const app = await construirApp(env);
 
   await app.listen({ host: env.HOST, port: env.PORT });
 
