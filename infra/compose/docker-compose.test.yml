@@ -2,11 +2,16 @@ name: iam-platform-test
 services:
   postgres:
     image: postgres:17-alpine
-    environment: { POSTGRES_USER: iam, POSTGRES_PASSWORD: iam_test, POSTGRES_DB: iam_test }
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER_TEST}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD_TEST}
+      POSTGRES_DB: ${POSTGRES_DB_TEST}
     ports: ["55432:5432"]
     tmpfs: [/var/lib/postgresql/data]
   mongodb:
     image: mongo:8
-    environment: { MONGO_INITDB_ROOT_USERNAME: iam, MONGO_INITDB_ROOT_PASSWORD: iam_test }
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME_TEST}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD_TEST}
     ports: ["57017:27017"]
     tmpfs: [/data/db]
