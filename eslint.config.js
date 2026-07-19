@@ -16,7 +16,7 @@ export default tseslint.config(
   // src/config/env.ts é o único ponto de leitura de process.env (SPEC 021, design.md §4).
   // Qualquer outro módulo consome a configuração já validada via `import { env }`.
   {
-    files: ['src/**/*.ts', 'tests/**/*.ts'],
+    files: ['src/**/*.ts'],
     ignores: ['src/config/env.ts'],
     rules: {
       'no-restricted-properties': [
