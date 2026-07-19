@@ -6,9 +6,10 @@
  *         handler global de erros converte AppError → RFC 7807; nunca vazar stack em produção.
  */
 import Fastify, { type FastifyInstance } from 'fastify';
-import { env } from './config/env.js';
+import { carregarEnv } from './config/env.js';
 
 export async function construirApp(): Promise<FastifyInstance> {
+  const env = carregarEnv();
   const app = Fastify({
     logger: { level: env.LOG_LEVEL },
   });

@@ -3,9 +3,10 @@
  * Regras: repositórios recebem Pool/PoolClient por construtor — proibido importar este módulo dentro de modules/.
  */
 import pg from 'pg';
-import { env } from '../../config/env.js';
+import { carregarEnv } from '../../config/env.js';
 
 export function criarPoolPostgres(): pg.Pool {
+  const env = carregarEnv();
   return new pg.Pool({
     connectionString: env.POSTGRES_URL,
     max: env.POSTGRES_POOL_MAX,

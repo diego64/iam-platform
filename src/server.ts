@@ -3,9 +3,10 @@
  * Regras: SIGTERM/SIGINT fecham servidor e pools na ordem inversa; timeout de shutdown de 10s.
  */
 import { construirApp } from './app.js';
-import { env } from './config/env.js';
+import { carregarEnv } from './config/env.js';
 
 async function iniciar(): Promise<void> {
+  const env = carregarEnv();
   const app = await construirApp();
 
   await app.listen({ host: env.HOST, port: env.PORT });
