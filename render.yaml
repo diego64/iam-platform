@@ -1,0 +1,43 @@
+# Blueprint do Render.
+#
+# A tag da imagem é substituída pelo pipeline (SPEC 023) a cada promoção. Nunca
+# usar `latest`: tag mutável torna o rollback não determinístico, porque a versão
+# que estava rodando deixa de ser recuperável por tag.
+services:
+  - type: web
+    name: iam-platform
+    runtime: image
+    image:
+      url: ghcr.io/diego64/iam-platform:sha-PLACEHOLDER
+    plan: starter
+    region: oregon
+
+    # Liveness enquanto a SPEC 017 não entrega /health/ready. Trocar para
+    # /health/ready assim que existir: liveness não checa PostgreSQL nem MongoDB,
+    # então hoje o Render promove um deploy que ainda não fala com os bancos.
+    healthCheckPath: /health/live
+
+    # Roda uma vez, antes de trocar o tráfego. No entrypoint do container, N
+    # réplicas subindo em paralelo executariam a migração N vezes.
+    preDeployCommand: pnpm migrate
+
+    # Promoção é do pipeline, não do push. Deploy automático em push tira do
+    # gate de qualidade o poder de barrar uma versão.
+    autoDeploy: false
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: info
+      - key: MONGODB_DB
+        value: iam_sessions
+      - key: SHUTDOWN_TIMEOUT_MS
+        value: '10000'
+
+      # sync: false ⇒ o valor é definido no painel/secret manager e nunca entra
+      # neste arquivo, que é versionado.
+      - key: POSTGRES_URL
+        sync: false
+      - key: MONGODB_URL
+        sync: false
