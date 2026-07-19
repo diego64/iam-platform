@@ -11,6 +11,7 @@
  * entram por composição nas SPECs que as consomem (007, 009, 016, 015) — ver design.md §4.
  */
 import { z } from 'zod';
+import type { Logger } from '../shared/logger/index.js';
 
 export const esquemaEnv = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -49,17 +50,43 @@ export class ErroDeConfiguracao extends Error {
 }
 
 /**
+ * Descreve o problema usando APENAS o que vem do schema (tipo esperado, conjunto de
+ * enum, limites). `issue.message` é deliberadamente descartada: o Zod embute o valor
+ * recebido em várias delas — "Invalid enum value. Expected 'a'|'b', received 'SEGREDO'" —
+ * o que transformaria o log fatal em canal de vazamento.
+ */
+function descreverProblema(issue: z.ZodIssue): string {
+  switch (issue.code) {
+    case 'invalid_type':
+      return issue.received === 'undefined'
+        ? 'obrigatória e ausente'
+        : `esperado ${issue.expected}`;
+    case 'invalid_enum_value':
+      return `valor fora do conjunto permitido (${issue.options.join(' | ')})`;
+    case 'invalid_string':
+      return typeof issue.validation === 'string'
+        ? `formato inválido (esperado ${issue.validation})`
+        : 'formato inválido';
+    case 'too_small':
+      return `abaixo do mínimo permitido (${String(issue.minimum)})`;
+    case 'too_big':
+      return `acima do máximo permitido (${String(issue.maximum)})`;
+    case 'not_multiple_of':
+      return 'esperado número inteiro';
+    default:
+      return 'valor inválido';
+  }
+}
+
+/**
  * Traduz o erro do Zod para uma lista legível de problemas.
- * `issue.path` dá o nome da variável; `issue.message`, o motivo. O valor recebido
- * nunca é lido — é o que impede um secret malformado de vazar para o log da plataforma.
+ * `issue.path` dá o nome da variável; o motivo vem de descreverProblema, que nunca
+ * lê o valor recebido — é o que impede um secret malformado de vazar para o log.
  */
 function traduzirProblemas(erro: z.ZodError): ProblemaDeVariavel[] {
   return erro.issues.map((issue) => ({
     nome: issue.path.join('.') || '(raiz)',
-    problema:
-      issue.code === 'invalid_type' && issue.received === 'undefined'
-        ? 'obrigatória e ausente'
-        : issue.message,
+    problema: descreverProblema(issue),
   }));
 }
 
@@ -83,3 +110,20 @@ export function carregarEnv(fonte: NodeJS.ProcessEnv = process.env): Env {
  * qualquer `import` — inclusive de teste — derrubar o processo. Quem chama carregarEnv()
  * é o server.ts, uma vez, e injeta o resultado nas factories (T05/T07).
  */
+
+/**
+ * Emite o log fatal de configuração inválida.
+ *
+ * Só publica NOME e MOTIVO de cada variável. O valor recebido nunca é lido nem
+ * impresso: uma MASTER_KEY ou POSTGRES_URL malformada não pode acabar no log da
+ * plataforma, que costuma ser retido e indexado por muito mais tempo que o incidente.
+ */
+export function reportarErroDeConfiguracao(erro: ErroDeConfiguracao, logger: Logger): void {
+  logger.fatal(
+    {
+      codigo: erro.codigo,
+      variaveis: erro.variaveis.map((v) => ({ nome: v.nome, problema: v.problema })),
+    },
+    erro.message,
+  );
+}
