@@ -1,4 +1,11 @@
+# Infra efêmera para test:integration e test:e2e.
+#
+# tmpfs: os dados vivem em memória e morrem com o container — cada execução parte
+# de um estado limpo, sem passo de limpeza.
+# Portas altas (55432/57017): permitem rodar a suíte com o ambiente de
+# desenvolvimento no ar ao mesmo tempo, sem conflito.
 name: iam-platform-test
+
 services:
   postgres:
     image: postgres:17-alpine
@@ -6,12 +13,23 @@ services:
       POSTGRES_USER: ${POSTGRES_USER_TEST}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD_TEST}
       POSTGRES_DB: ${POSTGRES_DB_TEST}
-    ports: ["55432:5432"]
+    ports: ['127.0.0.1:55432:5432']
     tmpfs: [/var/lib/postgresql/data]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER_TEST} -d ${POSTGRES_DB_TEST}']
+      interval: 3s
+      timeout: 3s
+      retries: 15
+
   mongodb:
     image: mongo:8
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME_TEST}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD_TEST}
-    ports: ["57017:27017"]
+    ports: ['127.0.0.1:57017:27017']
     tmpfs: [/data/db]
+    healthcheck:
+      test: ['CMD', 'mongosh', '--quiet', '--eval', "db.adminCommand('ping').ok"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
