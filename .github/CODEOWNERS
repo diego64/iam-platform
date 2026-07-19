@@ -1,0 +1,10 @@
+# Donos do código — revisão obrigatória em todo PR.
+# Ajuste o handle se o usuário do GitHub for diferente.
+
+* @diego64
+
+# Áreas sensíveis — reforço de revisão
+/.github/                             @diego64
+/database/                            @diego64
+/src/infraestrutura/http/middlewares/ @diego64
+SECURITY.md                           @diego64

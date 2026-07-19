@@ -1,0 +1,25 @@
+name: Backup
+
+on:
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Backup PostgreSQL
+        env: { POSTGRES_URL: '${{ secrets.PROD_POSTGRES_URL }}' }
+        run: bash scripts/backup.sh --postgres
+      - name: Backup MongoDB
+        env: { MONGODB_URL: '${{ secrets.PROD_MONGODB_URL }}' }
+        run: bash scripts/backup.sh --mongodb
+      - name: Validar Backup
+        run: bash scripts/backup.sh --validate
+      - uses: actions/upload-artifact@v6
+        with: { name: 'backup-${{ github.run_id }}', path: backups/, retention-days: 14 }

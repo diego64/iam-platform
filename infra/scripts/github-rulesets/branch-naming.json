@@ -1,0 +1,22 @@
+{
+  "name": "convencao-de-branches",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": ["~ALL"],
+      "exclude": ["refs/heads/main"]
+    }
+  },
+  "rules": [
+    {
+      "type": "branch_name_pattern",
+      "parameters": {
+        "operator": "regex",
+        "pattern": "^(feat|fix|docs|test|build|perf|style|refactor|chore|ci|raw|cleanup|remove)\\/[a-z0-9._-]+$",
+        "negate": false,
+        "name": "prefixos permitidos"
+      }
+    }
+  ]
+}

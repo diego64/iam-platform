@@ -1,0 +1,26 @@
+name: Segurança Agendada
+
+on:
+  schedule:
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  issues: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: pnpm audit (falha em high)
+        run: pnpm audit --audit-level high
+      - name: Secret scan completo do histórico
+        uses: trufflesecurity/trufflehog@main
+        with: { extra_args: --results=verified }

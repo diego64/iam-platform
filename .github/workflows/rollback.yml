@@ -1,0 +1,36 @@
+name: Rollback (Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Tag da release para restaurar (ex: v0.3.1)'
+        required: true
+      restore_database:
+        description: 'Restaurar backup do banco?'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v6
+        with: { ref: '${{ inputs.release_tag }}' }
+      - name: Restaurar Banco
+        if: inputs.restore_database
+        env:
+          POSTGRES_URL: ${{ secrets.PROD_POSTGRES_URL }}
+          MONGODB_URL: ${{ secrets.PROD_MONGODB_URL }}
+        run: bash scripts/rollback.sh --database "${{ inputs.release_tag }}"
+      - name: Restaurar Docker Image (redeploy da tag)
+        run: |
+          curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}&ref=${{ inputs.release_tag }}"
+      - name: Smoke Test
+        env: { BASE_URL: '${{ secrets.PROD_BASE_URL }}' }
+        run: bash scripts/healthcheck.sh "$BASE_URL" --smoke

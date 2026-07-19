@@ -1,0 +1,26 @@
+name: Docker Scan (Agendado)
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  security-events: write
+  packages: read
+
+jobs:
+  scan-latest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trivy na última imagem publicada
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ghcr.io/${{ github.repository }}:latest
+          severity: MEDIUM,HIGH,CRITICAL
+          exit-code: '1'
+          format: sarif
+          output: trivy.sarif
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with: { sarif_file: trivy.sarif }

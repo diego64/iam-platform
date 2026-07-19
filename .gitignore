@@ -1,0 +1,15 @@
+node_modules/
+dist/
+coverage/
+.stryker-tmp/
+reports/
+.claude/
+specs/
+*.log
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+security/sbom/*.json
+CLAUDE.md

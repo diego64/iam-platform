@@ -1,0 +1,26 @@
+name: SBOM
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  sbom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: anchore/sbom-action@v0
+        with: { format: spdx-json, output-file: sbom.spdx.json }
+      - uses: anchore/sbom-action@v0
+        with: { format: cyclonedx-json, output-file: sbom.cdx.json }
+      - name: Anexar SBOM à release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            sbom.spdx.json
+            sbom.cdx.json

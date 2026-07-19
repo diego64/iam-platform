@@ -1,0 +1,15 @@
+groups:
+  - name: iam-seguranca
+    rules:
+      - alert: PossivelBruteForce
+        expr: rate(iam_login_failures_total[5m]) > 1
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "Taxa anômala de falhas de login (possível brute force)"
+      - alert: ValidacaoDeTokenLenta
+        expr: histogram_quantile(0.95, rate(iam_token_validation_duration_seconds_bucket[5m])) > 0.05
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "p95 da validação de JWT acima de 50ms"

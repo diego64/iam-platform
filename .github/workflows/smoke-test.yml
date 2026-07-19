@@ -1,0 +1,15 @@
+name: Smoke Test (Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'URL base do ambiente'
+        required: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - run: bash scripts/healthcheck.sh "${{ inputs.base_url }}" --smoke

@@ -1,0 +1,5 @@
+# Valida Conventional Commits (tipos alinhados às convenções de branch do projeto)
+grep -qE '^(feat|fix|docs|test|build|perf|style|refactor|chore|ci|raw|cleanup|remove)(\(.+\))?!?: .{1,100}' "$1" || {
+  echo "Commit inválido. Use: <tipo>: <descrição> — tipos: feat|fix|docs|test|build|perf|style|refactor|chore|ci|raw|cleanup|remove"
+  exit 1
+}

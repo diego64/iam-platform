@@ -1,0 +1,14 @@
+name: Health Check (Produção)
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - env: { BASE_URL: '${{ secrets.PROD_BASE_URL }}' }
+        run: bash scripts/healthcheck.sh "$BASE_URL"
