@@ -41,7 +41,7 @@ jobs:
             type=raw,value=latest
       - id: push
         name: Push GHCR
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: infra/docker/Dockerfile
