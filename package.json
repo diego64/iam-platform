@@ -34,6 +34,10 @@
     "openapi:validate": "spectral lint openapi/openapi.yaml",
     "infra:up": "docker compose -f infra/compose/docker-compose.yml up -d",
     "infra:down": "docker compose -f infra/compose/docker-compose.yml down",
+    "docker:build": "docker build -f infra/docker/Dockerfile -t iam-platform:local .",
+    "docker:run": "docker run --rm -p 3000:3000 --env-file .env iam-platform:local",
+    "infra:test:up": "docker compose -f infra/compose/docker-compose.test.yml --env-file infra/compose/.env up -d --wait",
+    "infra:test:down": "docker compose -f infra/compose/docker-compose.test.yml --env-file infra/compose/.env down",
     "infra:monitoring": "docker compose -f infra/compose/docker-compose.monitoring.yml up -d",
     "prepare": "husky"
   },
