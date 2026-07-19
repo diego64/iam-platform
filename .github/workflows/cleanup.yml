@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Excluir cache antigo
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const caches = await github.rest.actions.getActionsCacheList({ ...context.repo, per_page: 100 });
@@ -31,7 +31,7 @@ jobs:
           min-versions-to-keep: 10
           delete-only-untagged-versions: true
       - name: Excluir artefatos antigos
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const arts = await github.rest.actions.listArtifactsForRepo({ ...context.repo, per_page: 100 });
