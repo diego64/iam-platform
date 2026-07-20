@@ -18,6 +18,7 @@ import {
 import type { Env } from './config/env.js';
 import { montarProblema } from './shared/errors/problem-json.js';
 import { registrarRotasDeHealth } from './modules/health/index.js';
+import type { ServicoDeProntidao } from './modules/health/services/prontidao.service.js';
 
 const TIPO_PROBLEM_JSON = 'application/problem+json';
 
@@ -39,7 +40,27 @@ export function hopsDeProxyConfiaveis(env: Env): number | false {
   return env.NODE_ENV === 'production' ? 1 : false;
 }
 
-export async function construirApp(env: Env): Promise<FastifyInstance> {
+export interface DependenciasDoApp {
+  /**
+   * Serviço de prontidão. Opcional porque testes que só exercitam liveness ou o handler
+   * de erro não precisam de banco — nesse caso o readiness responde 503, que é a
+   * resposta honesta para uma instância sem dependências configuradas.
+   */
+  readonly prontidao?: ServicoDeProntidao;
+}
+
+/** Prontidão degenerada: usada quando o app sobe sem dependências injetadas. */
+function prontidaoIndisponivel(): ServicoDeProntidao {
+  return {
+    consultar: () => Promise.resolve({ pronto: false, encerrando: false, dependencias: [] }),
+    marcarEncerrando: () => undefined,
+  };
+}
+
+export async function construirApp(
+  env: Env,
+  dependencias: DependenciasDoApp = {},
+): Promise<FastifyInstance> {
   const app = Fastify({
     logger: { level: env.LOG_LEVEL },
     trustProxy: hopsDeProxyConfiaveis(env),
@@ -110,7 +131,9 @@ export async function construirApp(env: Env): Promise<FastifyInstance> {
       .send(montarProblema('not-found', 'Recurso não encontrado', 404));
   });
 
-  registrarRotasDeHealth(app);
+  registrarRotasDeHealth(app, {
+    prontidao: dependencias.prontidao ?? prontidaoIndisponivel(),
+  });
 
   await app.ready();
   return app;

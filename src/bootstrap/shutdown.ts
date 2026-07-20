@@ -15,6 +15,12 @@ export interface RecursosDeEncerramento {
   readonly timeoutMs: number;
   /** Injetado para o teste observar o código de saída em vez de derrubar o processo. */
   readonly encerrarProcesso: (codigo: number) => void;
+  /**
+   * Chamado ANTES de app.close(), para o readiness passar a 503 enquanto a instância
+   * ainda drena. Sem isso, o balanceador segue mandando tráfego novo até o socket
+   * fechar — e essas requisições chegam a um processo que já está desligando.
+   */
+  readonly aoIniciarEncerramento?: () => void;
 }
 
 /**
@@ -31,7 +37,7 @@ export interface RecursosDeEncerramento {
 export function criarEncerrador(
   recursos: RecursosDeEncerramento,
 ): (sinal: string) => Promise<void> {
-  const { app, pool, mongo, logger, timeoutMs, encerrarProcesso } = recursos;
+  const { app, pool, mongo, logger, timeoutMs, encerrarProcesso, aoIniciarEncerramento } = recursos;
   let encerrando = false;
 
   return async function encerrar(sinal: string): Promise<void> {
@@ -42,6 +48,11 @@ export function criarEncerrador(
       return;
     }
     encerrando = true;
+
+    // Primeiro sinaliza a indisponibilidade, só depois começa a fechar. A ordem é o
+    // ponto: marcar depois do app.close() deixaria o balanceador enviando tráfego
+    // durante todo o dreno.
+    aoIniciarEncerramento?.();
 
     const inicio = Date.now();
     logger.warn({ sinal }, 'shutdown.started');

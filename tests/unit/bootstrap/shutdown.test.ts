@@ -73,6 +73,31 @@ describe('criarEncerrador — caminho feliz', () => {
   });
 });
 
+describe('criarEncerrador — sinalização de indisponibilidade', () => {
+  it('avisa o readiness ANTES de fechar o servidor', async () => {
+    const { recursos, ordem } = montarCenario();
+
+    await criarEncerrador({
+      ...recursos,
+      // Registra na MESMA trilha dos fechamentos: arrays separados não comparariam
+      // ordem, e a ordem é exatamente o que este teste precisa provar.
+      aoIniciarEncerramento: () => ordem.push('readiness'),
+    })('SIGTERM');
+
+    // Marcar depois do app.close() deixaria o balanceador enviando tráfego novo durante
+    // todo o dreno, para um processo que já está desligando.
+    expect(ordem).toEqual(['readiness', 'app', 'pool', 'mongo']);
+  });
+
+  it('funciona sem o gancho, que é opcional', async () => {
+    const { recursos, saidas } = montarCenario();
+
+    await criarEncerrador(recursos)('SIGTERM');
+
+    expect(saidas).toEqual([0]);
+  });
+});
+
 describe('criarEncerrador — reentrância', () => {
   it('ignora sinal repetido em vez de reiniciar a sequência', async () => {
     const { recursos, ordem, saidas } = montarCenario();
