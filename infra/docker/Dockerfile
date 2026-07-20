@@ -22,16 +22,32 @@ RUN pnpm build
 # e o husky acabou de ser removido por ser devDependency.
 RUN pnpm prune --prod --ignore-scripts
 
+# Manifesto mínimo para o runtime. Copiar o package.json completo faz scanners de
+# imagem (Trivy) reportarem CVEs de devDependencies que o prune já removeu do disco,
+# porque eles leem o manifesto e não o node_modules — ruído falso-positivo permanente
+# no gate de segurança. Em runtime só "type" importa, para o Node resolver ESM.
+RUN node -e "const p=require('./package.json'); \
+    require('fs').writeFileSync('/tmp/package.json', \
+    JSON.stringify({ name: p.name, version: p.version, type: p.type, private: true }, null, 2))"
+
 # ---- runtime: mínimo, sem toolchain, não-root ----
 FROM node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2 AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 
+# Remove npm e corepack do runtime. O container só executa `node dist/server.js` —
+# gerenciador de pacote em imagem de produção é superfície de ataque gratuita, e o
+# npm que vem na base carrega CVEs próprios (picomatch, sigstore) que apareciam no
+# scan mesmo sem nenhuma relação com as dependências do projeto.
+RUN rm -rf /usr/local/lib/node_modules/npm \
+           /usr/local/lib/node_modules/corepack \
+           /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
+
 RUN addgroup -S iam && adduser -S iam -G iam
 
 COPY --from=build --chown=iam:iam /app/node_modules ./node_modules
 COPY --from=build --chown=iam:iam /app/dist ./dist
-COPY --chown=iam:iam package.json ./
+COPY --from=build --chown=iam:iam /tmp/package.json ./package.json
 
 USER iam
 EXPOSE 3000
