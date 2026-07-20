@@ -5,6 +5,13 @@
  *         um container que sobe com dependência quebrada passa no health check do
  *         orquestrador e passa a receber tráfego.
  */
+// PRIMEIRO import, antes de qualquer módulo da aplicação — e o teste de contrato
+// `tests/contract/ordem-telemetria.test.ts` existe só para manter assim. A instrumentação
+// automática funciona substituindo métodos de fastify, pg e mongodb; se algum deles for
+// carregado antes do sdk.start(), a substituição não acontece. Não há erro, não há aviso:
+// a telemetria simplesmente fica vazia, e isso só é descoberto durante uma investigação
+// em que o trace já era necessário.
+import './telemetry/index.js';
 import { carregarEnv, ErroDeConfiguracao, reportarErroDeConfiguracao } from './config/env.js';
 import { criarLogger } from './shared/logger/index.js';
 import { criarPoolPostgres, verificarPostgres } from './database/postgres/connection.js';
