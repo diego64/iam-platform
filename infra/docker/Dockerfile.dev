@@ -1,7 +1,18 @@
-FROM node:22-alpine
+# syntax=docker/dockerfile:1
+# Imagem de desenvolvimento em container.
+#
+# NÃO é o caminho padrão de desenvolvimento: o fluxo normal é `pnpm infra:up`
+# (só bancos) + `pnpm dev` no host, que dá hot reload instantâneo, breakpoints do
+# editor e evita bind mount de node_modules entre musl e glibc.
+# Este arquivo existe para reproduzir problema que só aparece dentro do container.
+FROM node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2
 WORKDIR /app
+
 RUN corepack enable
+
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
+
 COPY . .
+EXPOSE 3000
 CMD ["pnpm", "dev"]

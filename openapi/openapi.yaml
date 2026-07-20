@@ -2,16 +2,72 @@ openapi: 3.1.0
 info:
   title: Custom IAM API
   version: 0.1.0
+  contact:
+    name: Equipe iam-platform
+    url: https://github.com/diego64/iam-platform
   description: >
     Provedor de Identidade (IdP/SSO). Emissão e validação de tokens para microsserviços.
     Autenticação via Bearer Token (JWT EdDSA) e fluxos OAuth2 (password, client_credentials, refresh_token).
+tags:
+  - name: health
+    description: Sondas de disponibilidade consumidas por Docker e Render.
 servers:
   - url: http://localhost:3000
     description: Desenvolvimento local
 components:
+  schemas:
+    Problem:
+      type: object
+      description: Erro no formato RFC 7807.
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
   securitySchemes:
     BearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
-paths: {}
+paths:
+  /health/live:
+    get:
+      tags: [health]
+      summary: Liveness probe
+      description: >
+        Indica que o processo está vivo. NÃO consulta PostgreSQL nem MongoDB: banco
+        fora não se resolve reiniciando o processo. A checagem de dependências é
+        readiness (/health/ready), entregue pela SPEC 017.
+      operationId: healthLive
+      security: []
+      responses:
+        '200':
+          description: Processo vivo
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [status, uptime_seconds]
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+                  uptime_seconds:
+                    type: integer
+                    minimum: 0
+              example:
+                status: ok
+                uptime_seconds: 1042
+        '404':
+          description: Recurso não encontrado
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'

@@ -13,5 +13,35 @@ export default tseslint.config(
       'no-console': 'error',
     },
   },
-  { ignores: ['dist/', 'coverage/', 'node_modules/', '*.config.js', '*.config.ts'] },
+  // src/config/env.ts é o único ponto de leitura de process.env (SPEC 021, design.md §4).
+  // Qualquer outro módulo consome a configuração já validada via `import { env }`.
+  {
+    files: ['src/**/*.ts'],
+    ignores: ['src/config/env.ts'],
+    rules: {
+      'no-restricted-properties': [
+        'error',
+        {
+          object: 'process',
+          property: 'env',
+          message:
+            'Use `import { env } from "@config/env.js"` — process.env só em src/config/env.ts.',
+        },
+      ],
+    },
+  },
+
+  // Scripts k6 (runtime Goja) e bootstrap do mongosh rodam fora do Node e fora do projeto
+  // TypeScript — não podem ser analisados pelas regras type-checked.
+  {
+    ignores: [
+      'dist/',
+      'coverage/',
+      'node_modules/',
+      'tests/performance/k6/',
+      'infra/',
+      '*.config.js',
+      '*.config.ts',
+    ],
+  },
 );

@@ -1,0 +1,142 @@
+/**
+ * Cobre o contrato de configuração da SPEC 021: defaults, coerção, validação de formato,
+ * agregação de erros e imutabilidade do objeto resultante.
+ */
+import { describe, expect, it } from 'vitest';
+import { carregarEnv, ErroDeConfiguracao, type Env } from '../../../src/config/env.js';
+
+/** Fonte mínima válida — só as variáveis sem default. */
+function fonteValida(sobrescritas: Record<string, string> = {}): NodeJS.ProcessEnv {
+  return {
+    POSTGRES_URL: 'postgres://localhost:5432/iam',
+    MONGODB_URL: 'mongodb://localhost:27017',
+    ...sobrescritas,
+  };
+}
+
+/** Captura o ErroDeConfiguracao para inspeção, falhando se nada for lançado. */
+function capturarErro(fonte: NodeJS.ProcessEnv): ErroDeConfiguracao {
+  try {
+    carregarEnv(fonte);
+  } catch (erro) {
+    expect(erro).toBeInstanceOf(ErroDeConfiguracao);
+    return erro as ErroDeConfiguracao;
+  }
+  throw new Error('esperava ErroDeConfiguracao, mas carregarEnv teve sucesso');
+}
+
+describe('carregarEnv — defaults', () => {
+  it('aplica os defaults quando as variáveis opcionais estão ausentes', () => {
+    const env = carregarEnv(fonteValida());
+
+    expect(env.NODE_ENV).toBe('development');
+    expect(env.HOST).toBe('0.0.0.0');
+    expect(env.PORT).toBe(3000);
+    expect(env.LOG_LEVEL).toBe('info');
+    expect(env.POSTGRES_POOL_MAX).toBe(10);
+    expect(env.MONGODB_DB).toBe('iam_sessions');
+    expect(env.SHUTDOWN_TIMEOUT_MS).toBe(10_000);
+  });
+
+  it('respeita o valor informado em vez do default', () => {
+    const env = carregarEnv(fonteValida({ NODE_ENV: 'production', LOG_LEVEL: 'warn' }));
+
+    expect(env.NODE_ENV).toBe('production');
+    expect(env.LOG_LEVEL).toBe('warn');
+  });
+});
+
+describe('carregarEnv — coerção de PORT', () => {
+  it('converte a string do ambiente em inteiro', () => {
+    const env = carregarEnv(fonteValida({ PORT: '8080' }));
+
+    expect(env.PORT).toBe(8080);
+    expect(typeof env.PORT).toBe('number');
+  });
+
+  it.each(['0', '70000', 'abc', '-1', '3000.5'])('rejeita PORT=%s', (porta) => {
+    const erro = capturarErro(fonteValida({ PORT: porta }));
+
+    expect(erro.variaveis.map((v) => v.nome)).toContain('PORT');
+  });
+});
+
+describe('carregarEnv — formato das URLs', () => {
+  it.each(['http://localhost:5432/iam', 'mysql://localhost:3306/iam', 'nao-e-url'])(
+    'rejeita POSTGRES_URL=%s',
+    (url) => {
+      const erro = capturarErro(fonteValida({ POSTGRES_URL: url }));
+
+      expect(erro.variaveis.map((v) => v.nome)).toContain('POSTGRES_URL');
+    },
+  );
+
+  it('aceita postgresql:// além de postgres://', () => {
+    const env = carregarEnv(fonteValida({ POSTGRES_URL: 'postgresql://iam@localhost:5432/iam' }));
+
+    expect(env.POSTGRES_URL).toBe('postgresql://iam@localhost:5432/iam');
+  });
+
+  it('aceita mongodb+srv://', () => {
+    const env = carregarEnv(fonteValida({ MONGODB_URL: 'mongodb+srv://cluster.exemplo.net' }));
+
+    expect(env.MONGODB_URL).toBe('mongodb+srv://cluster.exemplo.net');
+  });
+
+  it('rejeita MONGODB_URL com esquema alheio', () => {
+    const erro = capturarErro(fonteValida({ MONGODB_URL: 'http://localhost:27017' }));
+
+    expect(erro.variaveis.map((v) => v.nome)).toContain('MONGODB_URL');
+  });
+});
+
+describe('carregarEnv — agregação de erros', () => {
+  it('reporta TODOS os problemas de uma vez, não apenas o primeiro', () => {
+    const erro = capturarErro({ PORT: 'abc', LOG_LEVEL: 'barulhento' });
+
+    const nomes = erro.variaveis.map((v) => v.nome);
+    expect(nomes).toContain('POSTGRES_URL');
+    expect(nomes).toContain('MONGODB_URL');
+    expect(nomes).toContain('PORT');
+    expect(nomes).toContain('LOG_LEVEL');
+    expect(erro.variaveis.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('descreve variável ausente como "obrigatória e ausente"', () => {
+    const erro = capturarErro({ MONGODB_URL: 'mongodb://localhost:27017' });
+
+    const problema = erro.variaveis.find((v) => v.nome === 'POSTGRES_URL');
+    expect(problema?.problema).toBe('obrigatória e ausente');
+  });
+
+  it('carrega o código ENV_INVALIDO', () => {
+    const erro = capturarErro({});
+
+    expect(erro.codigo).toBe('ENV_INVALIDO');
+    expect(erro.name).toBe('ErroDeConfiguracao');
+  });
+});
+
+describe('carregarEnv — superset e imutabilidade', () => {
+  it('ignora variáveis desconhecidas em vez de invalidar (process.env é superset)', () => {
+    const env = carregarEnv(fonteValida({ PATH: '/usr/bin', HOME: '/home/iam' }));
+
+    expect(env.PORT).toBe(3000);
+    expect(env).not.toHaveProperty('PATH');
+  });
+
+  it('devolve objeto congelado — mutação lança em strict mode', () => {
+    const env = carregarEnv(fonteValida());
+
+    expect(Object.isFrozen(env)).toBe(true);
+    expect(() => {
+      (env as unknown as { PORT: number }).PORT = 9999;
+    }).toThrow(TypeError);
+  });
+
+  it('tipa o retorno como somente-leitura', () => {
+    const env: Env = carregarEnv(fonteValida());
+
+    expect(env.MONGODB_DB).toBe('iam_sessions');
+  });
+});
