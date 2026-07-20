@@ -8,8 +8,29 @@ permissions:
   contents: read
 
 jobs:
+  verificar-imutabilidade:
+    name: Verificar que a versão é nova
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Recusar sobrescrita de release existente
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # Release publicada é o que se consulta durante um incidente para saber o que
+          # estava rodando. Sobrescrever destrói essa correspondência justamente quando
+          # ela é necessária. Versão nova exige bump, não reescrita.
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "::error::Release $TAG já existe. Suba a versão em vez de sobrescrever." >&2
+            exit 1
+          fi
+          echo "Versão $TAG é nova."
+
   release:
     name: Gerar Release
+    needs: [verificar-imutabilidade]
     runs-on: ubuntu-latest
     permissions:
       contents: write

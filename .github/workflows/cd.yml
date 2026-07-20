@@ -8,8 +8,11 @@ on:
 permissions:
   contents: read
 
+# Um build por vez na main, sem cancelar: cada commit precisa produzir seu digest,
+# e cancelar o anterior deixaria um commit da main sem artefato correspondente.
+# O grupo não é o da promoção — este workflow não toca em produção.
 concurrency:
-  group: cd-producao
+  group: entrega-main
   cancel-in-progress: false
 
 env:
