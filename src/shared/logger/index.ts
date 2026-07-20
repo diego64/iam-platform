@@ -5,6 +5,7 @@
  */
 import pino, { type Logger, type LoggerOptions } from 'pino';
 import type { Writable } from 'node:stream';
+import { caminhosDeCensura } from './redact.js';
 
 export type { Logger };
 
@@ -20,7 +21,12 @@ export interface OpcoesDeLogger {
  */
 export function criarLogger(opcoes: OpcoesDeLogger = {}): Logger {
   const { nivel = 'info', destino } = opcoes;
-  const configuracao: LoggerOptions = { level: nivel };
+  const configuracao: LoggerOptions = {
+    level: nivel,
+    // Censura senha, token e hash em todo log — inclusive nos logs de requisição que o
+    // Fastify emite com o corpo. `censored` deixa claro na saída que houve redação.
+    redact: { paths: caminhosDeCensura(), censor: '[censurado]' },
+  };
 
   return destino ? pino(configuracao, destino) : pino(configuracao);
 }
