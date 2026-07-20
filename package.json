@@ -11,7 +11,10 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild"
-    ]
+    ],
+    "overrides": {
+      "vite": "^6.4.3"
+    }
   },
   "scripts": {
     "dev": "tsx watch src/server.ts",
@@ -26,7 +29,6 @@
     "test:integration": "node --env-file-if-exists=infra/compose/.env ./node_modules/vitest/vitest.mjs run --dir tests/integration",
     "test:contract": "vitest run --dir tests/contract",
     "test:e2e": "node --env-file-if-exists=infra/compose/.env ./node_modules/vitest/vitest.mjs run --dir tests/e2e",
-    "test:mutation": "stryker run",
     "test:coverage": "vitest run --coverage",
     "test:load": "k6 run tests/performance/k6/login-flood.js",
     "migrate": "tsx scripts/migrate.ts",
@@ -56,22 +58,20 @@
     "zod": "^3.24.0"
   },
   "devDependencies": {
-    "@stryker-mutator/core": "^8.7.0",
-    "@stryker-mutator/vitest-runner": "^8.7.0",
+    "@stoplight/spectral-cli": "^6.14.0",
     "@types/node": "^22.10.0",
     "@types/pg": "^8.11.0",
-    "@stoplight/spectral-cli": "^6.14.0",
-    "@vitest/coverage-v8": "^2.1.0",
+    "@types/supertest": "^6.0.0",
+    "@vitest/coverage-v8": "^3.2.7",
     "eslint": "^9.17.0",
-    "typescript-eslint": "^8.18.0",
     "husky": "^9.1.0",
     "lint-staged": "^15.2.0",
     "pino-pretty": "^13.0.0",
     "prettier": "^3.4.0",
     "supertest": "^7.0.0",
-    "@types/supertest": "^6.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
-    "vitest": "^2.1.0"
+    "typescript-eslint": "^8.18.0",
+    "vitest": "^3.2.7"
   }
 }
