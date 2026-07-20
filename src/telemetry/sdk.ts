@@ -123,7 +123,21 @@ export function iniciarTelemetria(
             // não a resposta ao cliente.
             spanProcessors: [
               new tracing.BatchSpanProcessor(
-                new OTLPTraceExporter({ url: `${config.OTEL_EXPORTER_OTLP_ENDPOINT}/v1/traces` }),
+                new OTLPTraceExporter({
+                  url: `${config.OTEL_EXPORTER_OTLP_ENDPOINT}/v1/traces`,
+                  // Teto curto por tentativa: com o Collector fora, o default deixaria o
+                  // encerramento pendurado esperando um flush que não vai completar, e o
+                  // orquestrador mataria o processo por timeout — perdendo também as
+                  // requisições em voo que o shutdown gracioso existe para drenar.
+                  timeoutMillis: 2_000,
+                }),
+                {
+                  // Fila limitada: Collector fora por horas não pode virar vazamento de
+                  // memória. Cheia, o processor descarta span — telemetria é diagnóstico,
+                  // e perder diagnóstico é melhor que derrubar o serviço que ele observa.
+                  maxQueueSize: 2_048,
+                  exportTimeoutMillis: 2_000,
+                },
               ),
             ],
           }),

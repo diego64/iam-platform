@@ -17,6 +17,7 @@ import {
 } from 'fastify-type-provider-zod';
 import type { Env } from './config/env.js';
 import { montarProblema } from './shared/errors/problem-json.js';
+import { contextoDeTrace } from './shared/logger/index.js';
 import { registrarRotasDeHealth } from './modules/health/index.js';
 import type { ServicoDeProntidao } from './modules/health/services/prontidao.service.js';
 import type { Telemetria } from './telemetry/sdk.js';
@@ -105,7 +106,10 @@ export async function construirApp(
   dependencias: DependenciasDoApp = {},
 ): Promise<FastifyInstance> {
   const app = Fastify({
-    logger: { level: env.LOG_LEVEL },
+    // O mesmo mixin do criarLogger: o Fastify instancia o Pino por conta própria, e sem
+    // repeti-lo aqui justamente os logs de requisição — os que mais importam numa
+    // investigação — seriam os únicos sem trace_id.
+    logger: { level: env.LOG_LEVEL, mixin: contextoDeTrace },
     trustProxy: hopsDeProxyConfiaveis(env),
   });
 
