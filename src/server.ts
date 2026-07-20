@@ -11,7 +11,7 @@
 // carregado antes do sdk.start(), a substituição não acontece. Não há erro, não há aviso:
 // a telemetria simplesmente fica vazia, e isso só é descoberto durante uma investigação
 // em que o trace já era necessário.
-import './telemetry/index.js';
+import { telemetria } from './telemetry/index.js';
 import { carregarEnv, ErroDeConfiguracao, reportarErroDeConfiguracao } from './config/env.js';
 import { criarLogger } from './shared/logger/index.js';
 import { criarPoolPostgres, verificarPostgres } from './database/postgres/connection.js';
@@ -76,7 +76,7 @@ async function iniciar(): Promise<void> {
     logger,
   });
 
-  const app = await construirApp(env, { prontidao });
+  const app = await construirApp(env, { prontidao, telemetria });
 
   // Handlers ANTES do listen. Registrá-los depois deixa uma janela em que o processo
   // já aceita conexões mas ainda usa o comportamento default de SIGTERM: morte

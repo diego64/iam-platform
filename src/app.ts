@@ -19,6 +19,10 @@ import type { Env } from './config/env.js';
 import { montarProblema } from './shared/errors/problem-json.js';
 import { registrarRotasDeHealth } from './modules/health/index.js';
 import type { ServicoDeProntidao } from './modules/health/services/prontidao.service.js';
+import type { Telemetria } from './telemetry/sdk.js';
+import { criarInstrumentos, rotuloDeRota } from './telemetry/metricas.js';
+import { rotaIsenta } from './telemetry/rotas-isentas.js';
+import { registrarRotaDeMetrics } from './modules/metrics/index.js';
 
 const TIPO_PROBLEM_JSON = 'application/problem+json';
 
@@ -47,6 +51,12 @@ export interface DependenciasDoApp {
    * resposta honesta para uma instância sem dependências configuradas.
    */
   readonly prontidao?: ServicoDeProntidao;
+  /**
+   * Telemetria já iniciada. Ausente — como na maior parte dos testes — o app sobe sem
+   * hook de métrica e sem rota `/metrics`: instrumentar teste unitário só acrescenta
+   * ruído e lentidão.
+   */
+  readonly telemetria?: Telemetria;
 }
 
 /** Prontidão degenerada: usada quando o app sobe sem dependências injetadas. */
@@ -55,6 +65,39 @@ function prontidaoIndisponivel(): ServicoDeProntidao {
     consultar: () => Promise.resolve({ pronto: false, encerrando: false, dependencias: [] }),
     marcarEncerrando: () => undefined,
   };
+}
+
+/**
+ * Mede toda requisição atendida, exceto as isentas.
+ *
+ * `onResponse` e não `onSend`: aqui a resposta já foi escrita, então o `statusCode` é
+ * definitivo e o `elapsedTime` cobre o tempo inteiro, inclusive a serialização.
+ *
+ * O rótulo sai de `routeOptions.url`, o template registrado — nunca de `request.url`.
+ * `/users/42` precisa virar `/users/:id`; com o valor bruto, cada usuário criaria uma
+ * série e o Prometheus cairia sob a própria cardinalidade.
+ */
+export function registrarMetricasDeRequisicao(app: FastifyInstance, commit: string): void {
+  const instrumentos = criarInstrumentos(commit);
+
+  app.addHook('onResponse', (requisicao, resposta, prosseguir) => {
+    const rota = rotuloDeRota(requisicao.routeOptions.url);
+
+    // Sonda de liveness a cada poucos segundos e raspagem a cada 15 s dominariam o
+    // histograma: o p95 passaria a descrever o health check, não o serviço.
+    if (!rotaIsenta(rota)) {
+      instrumentos.registrarRequisicao(
+        {
+          method: requisicao.method,
+          route: rota,
+          status_code: resposta.statusCode,
+        },
+        resposta.elapsedTime / 1_000,
+      );
+    }
+
+    prosseguir();
+  });
 }
 
 export async function construirApp(
@@ -130,6 +173,12 @@ export async function construirApp(
       .type(TIPO_PROBLEM_JSON)
       .send(montarProblema('not-found', 'Recurso não encontrado', 404));
   });
+
+  const exportador = dependencias.telemetria?.exportadorPrometheus;
+  if (exportador !== undefined) {
+    registrarMetricasDeRequisicao(app, env.GIT_COMMIT);
+    registrarRotaDeMetrics(app, { exportador });
+  }
 
   registrarRotasDeHealth(app, {
     prontidao: dependencias.prontidao ?? prontidaoIndisponivel(),
