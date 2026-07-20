@@ -16,6 +16,10 @@ export default defineConfig({
       exclude: ['src/server.ts', 'src/**/index.ts', 'src/**/types/**'],
       thresholds: { lines: 85, functions: 85, branches: 80, statements: 85 },
     },
+    // Sandboxes que o Stryker deixa para trás contêm cópias completas da suíte; sem
+    // isto o vitest as coleta e roda tudo em duplicata, com resultados que não são do
+    // projeto. Um run de mutação interrompido não pode contaminar a suíte normal.
+    exclude: ['**/node_modules/**', '**/dist/**', '.stryker-tmp/**', 'reports/**'],
     testTimeout: 15000,
   },
   resolve: {
