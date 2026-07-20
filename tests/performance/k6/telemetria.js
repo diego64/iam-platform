@@ -7,7 +7,7 @@
  *    de 3 ms). Telemetria cara demais acaba desligada em produção "temporariamente" — e
  *    aí não existe observabilidade justamente quando ela é necessária.
  *
- * 2. Quanto custa servir o /metrics (RNF-02: p95 abaixo de 50 ms). A raspagem acontece a
+ * 2. Quanto custa servir o /metrics (p95 abaixo de 50 ms). A raspagem acontece a
  *    cada 15 s, indefinidamente: um endpoint caro vira carga permanente cobrada do mesmo
  *    processo que atende o tráfego real.
  *
@@ -77,7 +77,7 @@ export const options = {
     // Garante que o teste exercitou de verdade, em vez de passar por vacuidade. Um
     // contador à parte porque Trend do k6 não aceita agregação `count`.
     telemetria_pares: ['count>800'],
-    // RNF-02: custo de servir a raspagem.
+    // custo de servir a raspagem.
     telemetria_latencia_metrics: ['p(95)<50'],
     http_req_failed: ['rate==0'],
   },
