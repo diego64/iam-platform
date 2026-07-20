@@ -1,11 +1,11 @@
 /**
  * Responsabilidade: hash e verificação de senhas com `scrypt` nativo do `node:crypto`.
- * Consumido por: a 002 (hash da senha inicial), a 001 (verificação no login) e o
+ * Consumido por: (hash da senha inicial), a (verificação no login) e o
  * PasswordService desta SPEC (troca/reset).
  * Regras:
  *  - Formato de armazenamento versionado: `scrypt$N$r$p$saltB64$hashB64`. Os parâmetros
  *    viajam no hash, então `verificar` reconstrói o custo com que ele foi gerado e um
- *    `precisaRehash` (T02) pode comparar com o custo corrente.
+ *    `precisaRehash` pode comparar com o custo corrente.
  *  - Salt de 32 bytes por senha; hash de 64 bytes; comparação com `timingSafeEqual`.
  *  - Senha errada e hash malformado retornam `false` — nunca lançam. O motivo fica no
  *    domínio de quem chamou, nunca vaza pela exceção.
@@ -32,14 +32,14 @@ export interface ServicoDeSenha {
   verificar(senha: string, hashArmazenado: string): Promise<boolean>;
   /**
    * `true` quando o hash foi gerado com parâmetros diferentes dos correntes — sinal para
-   * re-hash oportunista no próximo login bem-sucedido (a 001 tem a senha em claro em mãos
+   * re-hash oportunista no próximo login bem-sucedido (tem a senha em claro em mãos
    * nesse instante). É como o custo evolui sem migração em massa. Hash malformado devolve
    * `true`: o formato mudou, precisa ser regravado.
    */
   precisaRehash(hashArmazenado: string): boolean;
   /**
    * Um hash real, de custo corrente, gerado a partir de segredo aleatório — nenhuma senha
-   * o verifica como `true`. A 001 compara contra ele quando o usuário não existe, para o
+   * o verifica como `true`. Compara contra ele quando o usuário não existe, para o
    * caminho "não existe" pagar exatamente o mesmo tempo do caminho legítimo e não
    * denunciar a ausência por timing. Gerado uma vez e reusado; um `setTimeout` fingindo o
    * custo seria frágil e mensurável, um hash real tem a distribuição de tempo certa.

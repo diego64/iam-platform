@@ -4,7 +4,7 @@
  * Consumido por: server.ts e testes de integração (Supertest usa o app sem listen).
  * Regras: recebe a configuração por injeção; nunca lê process.env nem abre socket.
  *
- * Escopo SPEC 021: helmet, cors restrito e rate limit global entram nas SPECs 024 e 016.
+ * Escopo helmet, cors restrito e rate limit global são aplicados no server.ts, que é o entrypoint do processo.
  */
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import fastifySwagger from '@fastify/swagger';
@@ -82,8 +82,6 @@ export async function construirApp(
   });
 
   // A UI (e o /docs/json que vem com ela) publica a superfície inteira da API sem
-  // autenticação. Hoje isso é só /health/live; conforme 001 e 012 entrarem, vira o mapa
-  // dos endpoints de autenticação e OAuth entregue de graça a quem varre a internet.
   // O @fastify/swagger acima continua registrado em todo ambiente: ele só constrói o
   // documento em memória, sem expor rota — é o que alimenta app.swagger() e o teste de
   // contrato.

@@ -1,10 +1,10 @@
 /**
- * Responsabilidade: representação base de erro em RFC 7807 (application/problem+json).
+ * Responsabilidade: representação base de erro em (application/problem+json).
  * Consumido por: o handler global de erros do app.
  * Regras: `detail` nunca carrega stack, SQL, nome de host interno ou valor de secret.
  *
- * Escopo SPEC 021: só o contrato e o handler genérico. A hierarquia de AppError por
- * domínio pertence à SPEC 001 (T01), que estende este módulo sem reescrevê-lo.
+ * Escopo: só o contrato e o handler genérico. A hierarquia de AppError por
+ *  domínio e a tradução de erros de driver para AppError ficam na T02.
  */
 
 export const TIPO_BASE = 'https://iam.example.com/problems';

@@ -57,6 +57,25 @@ describe('registrar', () => {
   });
 });
 
+describe('buscarValido', () => {
+  it('devolve o dono sem consumir — o token segue usável depois', async () => {
+    const token = tokenNovo();
+    await repo.registrar({ token, userId: 'u1', expiraEm: daquiA(30) });
+
+    expect(await repo.buscarValido(token)).toEqual({ userId: 'u1' });
+    // Não consumiu: ainda dá para consumir de fato.
+    expect(await repo.consumir(token)).toEqual({ userId: 'u1' });
+  });
+
+  it('devolve null para token inexistente e para expirado', async () => {
+    const expirado = tokenNovo();
+    await repo.registrar({ token: expirado, userId: 'u1', expiraEm: daquiA(-1) });
+
+    expect(await repo.buscarValido(tokenNovo())).toBeNull();
+    expect(await repo.buscarValido(expirado)).toBeNull();
+  });
+});
+
 describe('consumir', () => {
   it('devolve o dono e marca usado no feliz', async () => {
     const token = tokenNovo();

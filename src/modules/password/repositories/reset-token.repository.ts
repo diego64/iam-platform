@@ -27,9 +27,17 @@ export interface RepositorioDeTokenDeReset {
     ipOrigem?: string;
   }): Promise<void>;
   /**
+   * Busca **sem consumir** um token válido (não usado, não expirado) e devolve o dono, ou
+   * `null`. Serve para validar a nova senha antes de gastar o token — assim uma senha
+   * reprovada não queima o token e obriga o usuário a pedir outro. A garantia de uso único
+   * fica no `consumir` atômico logo depois.
+   */
+  buscarValido(token: string): Promise<TokenDeResetConsumido | null>;
+  /**
    * Consome o token: marca `used_at` de forma atômica e devolve o dono. Devolve `null`
    * quando o token não existe, expirou ou já foi usado — sem distinguir os casos, para o
-   * chamador responder um erro genérico único.
+   * chamador responder um erro genérico único. É este passo, não o `buscarValido`, que
+   * fecha a corrida entre dois resets simultâneos.
    */
   consumir(token: string): Promise<TokenDeResetConsumido | null>;
   /** Invalida todos os tokens pendentes de um usuário (troca de senha por outro caminho). */
@@ -61,6 +69,15 @@ export function criarRepositorioDeTokenDeReset(banco: Db): RepositorioDeTokenDeR
         used_at: null,
         ...(ipOrigem === undefined ? {} : { requested_ip: ipOrigem }),
       });
+    },
+
+    async buscarValido(token: string): Promise<TokenDeResetConsumido | null> {
+      const doc = await colecao.findOne({
+        token_sha256: digerir(token),
+        used_at: null,
+        expires_at: { $gt: new Date() },
+      });
+      return doc === null ? null : { userId: doc.user_id };
     },
 
     async consumir(token: string): Promise<TokenDeResetConsumido | null> {

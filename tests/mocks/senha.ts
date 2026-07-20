@@ -9,6 +9,11 @@ import type {
 } from '../../src/modules/password/interfaces/usuario.port.js';
 import type { RevogadorDeSessoes } from '../../src/modules/password/interfaces/sessoes.port.js';
 import type { CanalDeNotificacao } from '../../src/modules/password/interfaces/notificacao.port.js';
+import type { RepositorioDeHistoricoDeSenha } from '../../src/modules/password/interfaces/historico.port.js';
+import type {
+  RepositorioDeTokenDeReset,
+  TokenDeResetConsumido,
+} from '../../src/modules/password/repositories/reset-token.repository.js';
 
 export interface RepositorioDeUsuarioFake extends RepositorioDeUsuario {
   semear(usuario: UsuarioParaSenha): void;
@@ -70,6 +75,53 @@ export function criarCanalDeNotificacaoFake(): CanalDeNotificacaoFake {
     enviados,
     enviarReset(email, token): Promise<void> {
       enviados.push({ email, token });
+      return Promise.resolve();
+    },
+  };
+}
+
+/** Histórico em memória: guarda os hashes por usuário, mais recente primeiro. */
+export function criarHistoricoFake(): RepositorioDeHistoricoDeSenha {
+  const porUsuario = new Map<string, string[]>();
+  return {
+    ultimosHashes(userId, n): Promise<string[]> {
+      return Promise.resolve((porUsuario.get(userId) ?? []).slice(0, n));
+    },
+    registrar(userId, hash): Promise<void> {
+      porUsuario.set(userId, [hash, ...(porUsuario.get(userId) ?? [])]);
+      return Promise.resolve();
+    },
+  };
+}
+
+/** Token de reset em memória, espelhando a semântica do repositório real (uso único). */
+export function criarTokensDeResetFake(): RepositorioDeTokenDeReset {
+  interface Registro {
+    userId: string;
+    expiraEm: number;
+    usado: boolean;
+  }
+  const porToken = new Map<string, Registro>();
+  const valido = (r: Registro | undefined): r is Registro =>
+    r !== undefined && !r.usado && r.expiraEm > Date.now();
+
+  return {
+    registrar({ token, userId, expiraEm }): Promise<void> {
+      porToken.set(token, { userId, expiraEm: expiraEm.getTime(), usado: false });
+      return Promise.resolve();
+    },
+    buscarValido(token): Promise<TokenDeResetConsumido | null> {
+      const r = porToken.get(token);
+      return Promise.resolve(valido(r) ? { userId: r.userId } : null);
+    },
+    consumir(token): Promise<TokenDeResetConsumido | null> {
+      const r = porToken.get(token);
+      if (!valido(r)) return Promise.resolve(null);
+      r.usado = true;
+      return Promise.resolve({ userId: r.userId });
+    },
+    invalidarDoUsuario(userId): Promise<void> {
+      for (const r of porToken.values()) if (r.userId === userId) r.usado = true;
       return Promise.resolve();
     },
   };
