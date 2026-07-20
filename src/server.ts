@@ -55,9 +55,11 @@ async function iniciar(): Promise<void> {
   logger.info('boot.indices_ok');
 
   const app = await construirApp(env);
-  await app.listen({ host: env.HOST, port: env.PORT });
-  logger.info({ porta: env.PORT, ambiente: env.NODE_ENV }, 'boot.listening');
 
+  // Handlers ANTES do listen. Registrá-los depois deixa uma janela em que o processo
+  // já aceita conexões mas ainda usa o comportamento default de SIGTERM: morte
+  // imediata, sem drenar nada. A janela é curta, mas é exatamente quando o
+  // orquestrador pode mandar o sinal — no fim de um deploy que está sendo revertido.
   const encerrar = criarEncerrador({
     app,
     pool,
@@ -71,6 +73,9 @@ async function iniciar(): Promise<void> {
 
   process.on('SIGTERM', () => void encerrar('SIGTERM'));
   process.on('SIGINT', () => void encerrar('SIGINT'));
+
+  await app.listen({ host: env.HOST, port: env.PORT });
+  logger.info({ porta: env.PORT, ambiente: env.NODE_ENV }, 'boot.listening');
 }
 
 void iniciar();
