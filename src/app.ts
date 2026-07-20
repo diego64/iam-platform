@@ -21,7 +21,7 @@ import { contextoDeTrace } from './shared/logger/index.js';
 import { registrarRotasDeHealth } from './modules/health/index.js';
 import type { ServicoDeProntidao } from './modules/health/services/prontidao.service.js';
 import type { Telemetria } from './telemetry/sdk.js';
-import { criarInstrumentos, rotuloDeRota } from './telemetry/metricas.js';
+import { obterInstrumentos, rotuloDeRota } from './telemetry/metricas.js';
 import { rotaIsenta } from './telemetry/rotas-isentas.js';
 import { registrarRotaDeMetrics } from './modules/metrics/index.js';
 
@@ -79,7 +79,7 @@ function prontidaoIndisponivel(): ServicoDeProntidao {
  * série e o Prometheus cairia sob a própria cardinalidade.
  */
 export function registrarMetricasDeRequisicao(app: FastifyInstance, commit: string): void {
-  const instrumentos = criarInstrumentos(commit);
+  const instrumentos = obterInstrumentos(commit);
 
   app.addHook('onResponse', (requisicao, resposta, prosseguir) => {
     const rota = rotuloDeRota(requisicao.routeOptions.url);

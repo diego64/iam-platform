@@ -19,6 +19,7 @@ import { conectarMongo } from './database/mongodb/connection.js';
 import { garantirIndices } from './database/mongodb/indexes.js';
 import { criarEncerrador } from './bootstrap/shutdown.js';
 import { construirApp } from './app.js';
+import { obterInstrumentos } from './telemetry/metricas.js';
 import { criarServicoDeProntidao } from './modules/health/services/prontidao.service.js';
 import {
   criarVerificadorMongo,
@@ -68,6 +69,7 @@ async function iniciar(): Promise<void> {
 
   // O controller de health não conhece pg nem mongodb: recebe verificadores prontos.
   const prontidao = criarServicoDeProntidao({
+    ...(telemetria.metricas ? { coletor: obterInstrumentos(env.GIT_COMMIT) } : {}),
     verificadores: [
       criarVerificadorPostgres(pool, env.HEALTH_TIMEOUT_MS),
       criarVerificadorMongo(banco, env.HEALTH_TIMEOUT_MS),

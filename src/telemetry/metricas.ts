@@ -99,6 +99,21 @@ export function criarInstrumentos(commit: string): Instrumentos {
   };
 }
 
+let instrumentos: Instrumentos | undefined;
+
+/**
+ * Instrumentos do processo, criados uma única vez.
+ *
+ * Dois consumidores precisam dos mesmos instrumentos — o hook de requisição e o serviço
+ * de prontidão — e eles são construídos em pontos diferentes do bootstrap. Criar duas
+ * vezes registraria o `iam_build_info` em duplicata e faria o OTel reclamar de conflito
+ * de instrumento a cada boot.
+ */
+export function obterInstrumentos(commit: string): Instrumentos {
+  instrumentos ??= criarInstrumentos(commit);
+  return instrumentos;
+}
+
 /**
  * Traduz a rota casada pelo Fastify no rótulo `route`.
  *
