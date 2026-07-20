@@ -14,7 +14,7 @@ import { createRequire } from 'node:module';
 import { NodeSDK, resources, tracing } from '@opentelemetry/sdk-node';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
-import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
+import { PrometheusExporter, PrometheusSerializer } from '@opentelemetry/exporter-prometheus';
 import { carregarConfigDeTelemetria, type ConfigDeTelemetria } from '../config/env.js';
 import { ROTAS_ISENTAS } from './rotas-isentas.js';
 
@@ -86,8 +86,18 @@ export function iniciarTelemetria(
     // `preventServerStart` porque o /metrics é servido pelo próprio Fastify: o
     // prometheus.yml já aponta para a porta da aplicação, e um segundo servidor HTTP
     // seria mais uma porta para expor, configurar e manter.
+    //
+    // `withoutScopeInfo` e `withoutTargetInfo` cortam rótulos que o exportador
+    // acrescentaria sozinho: `otel_scope_name` em toda série e um `target_info` que
+    // publica hostname, usuário do processo e a linha de comando completa. Nada disso é
+    // consultado durante um incidente, e a lista fechada de rótulos da SPEC não os prevê
+    // — rótulo entra fácil e o Prometheus o retém por meses.
     const exportadorPrometheus = metricas
-      ? new PrometheusExporter({ preventServerStart: true })
+      ? new PrometheusExporter({
+          preventServerStart: true,
+          withoutScopeInfo: true,
+          withoutTargetInfo: true,
+        })
       : undefined;
 
     const sdk = new NodeSDK({
@@ -132,6 +142,28 @@ export function iniciarTelemetria(
   } catch {
     return TELEMETRIA_DESLIGADA;
   }
+}
+
+/**
+ * Corta rótulos que o exportador acrescentaria sozinho: `otel_scope_name` em toda série e
+ * um `target_info` com hostname, usuário do processo e a linha de comando completa. Nada
+ * disso é consultado durante um incidente e nada disso está na lista fechada de rótulos.
+ *
+ * A ordem dos parâmetros posicionais é (prefixo, timestamp, rótulos de recurso,
+ * semTargetInfo, semScopeInfo).
+ */
+const SERIALIZADOR = new PrometheusSerializer(undefined, false, undefined, true, true);
+
+/**
+ * Texto de exposição do Prometheus, como o scraper o veria.
+ *
+ * Mora aqui, e não no controller, para que a rota e os testes leiam pelo mesmo caminho —
+ * um serializador configurado à parte no teste passaria a validar rótulos que a rota real
+ * não emite.
+ */
+export async function lerExposicaoPrometheus(exportador: PrometheusExporter): Promise<string> {
+  const { resourceMetrics } = await exportador.collect();
+  return SERIALIZADOR.serialize(resourceMetrics);
 }
 
 /**
