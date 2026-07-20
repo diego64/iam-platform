@@ -28,7 +28,7 @@ merge na main
      ⇒ publica digest e PARA. Nenhum deploy acontece aqui.
 
 promoção (manual)
-  └─ promote.yml: valida → [aprovação] → backup → deploy → smoke
+  └─ promote.yml: valida → [aprovação] → backup → deploy → smoke (/health/ready)
      └─ smoke falha ⇒ rollback.yml automático para o digest anterior
 
 semanalmente
@@ -119,9 +119,12 @@ indisponibilidade transitória cria um incidente onde não havia.
 
 - **`deployment_branch_policy` é `null`**: qualquer branch pode disparar a promoção.
   Restringir a `main` em Settings → Environments → `producao`.
-- **`/health/ready` não existe**: o smoke usa liveness, que responde 200 com os bancos
-  fora. Um deploy que não fala com o banco passa no smoke. Sem homologação, essa é a
-  lacuna mais afiada do pipeline.
+- **Variáveis de ambiente vivem em DOIS lugares.** Os secrets do Environment `producao`
+  servem aos _workflows_ (backup, smoke, deploy). A aplicação lê do painel do Render, e
+  o `sync: false` no `render.yaml` significa exatamente "defina lá, não aqui". Esquecer
+  o segundo faz o processo abortar no boot com `ENV_INVALIDO` listando o que falta —
+  comportamento correto, mas o diagnóstico costuma demorar porque o GitHub aparenta
+  estar configurado.
 - **Teste de mutação removido**: o Stryker saiu junto com suas vulnerabilidades e
   porque media zero mutantes. Volta quando houver serviços para mutar.
 - **`promote.yml`, `rollback.yml` e `rollback-drill.yml` nunca rodaram** em produção. A
