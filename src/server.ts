@@ -88,6 +88,7 @@ async function iniciar(): Promise<void> {
     app,
     pool,
     mongo,
+    telemetria,
     logger,
     timeoutMs: env.SHUTDOWN_TIMEOUT_MS,
     // Marca a indisponibilidade ANTES de app.close(), para o balanceador tirar esta
