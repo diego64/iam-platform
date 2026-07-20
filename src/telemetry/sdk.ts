@@ -79,6 +79,38 @@ function agregarFalhasDeExportacao(logger: Logger): () => void {
   };
 }
 
+/**
+ * Atributos que a instrumentação automática acrescenta e a SPEC proíbe.
+ *
+ * As instrumentações de `pg` e `mongodb` publicam `db.connection_string` — que carrega
+ * host, porta e nome do banco — e `db.user`. Juntos, descrevem a topologia interna para
+ * qualquer um com acesso ao backend de traces, e nada disso é necessário para responder
+ * "por que esta requisição demorou".
+ */
+const ATRIBUTOS_PROIBIDOS = ['db.connection_string', 'db.user'] as const;
+
+/**
+ * Remove os atributos proibidos antes de o span sair do processo.
+ *
+ * Registrado ANTES do processor de lote: o lote guarda o span por referência e serializa
+ * depois, então a limpeza precisa acontecer no `onEnd` que roda primeiro.
+ */
+function limparAtributosSensiveis(): tracing.SpanProcessor {
+  return {
+    onStart: () => undefined,
+    onEnd: (span) => {
+      for (const chave of ATRIBUTOS_PROIBIDOS) {
+        if (chave in span.attributes) {
+          // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+          delete (span.attributes as Record<string, unknown>)[chave];
+        }
+      }
+    },
+    forceFlush: () => Promise.resolve(),
+    shutdown: () => Promise.resolve(),
+  };
+}
+
 /** Handle inerte — usado quando nada foi ligado, para o resto do código não ramificar. */
 const TELEMETRIA_DESLIGADA: Telemetria = {
   ativa: false,
@@ -171,6 +203,7 @@ export function iniciarTelemetria(
             // Em lote, fora do caminho da requisição: Collector fora derruba o buffer,
             // não a resposta ao cliente.
             spanProcessors: [
+              limparAtributosSensiveis(),
               new tracing.BatchSpanProcessor(
                 new OTLPTraceExporter({
                   url: `${config.OTEL_EXPORTER_OTLP_ENDPOINT}/v1/traces`,
