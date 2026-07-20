@@ -58,9 +58,11 @@ describe('elevação por job', () => {
     // e contents:write para criar a release — cada um em seu job.
     const cd = permissoesDeJobs('cd.yml').join('\n');
 
+    // cd.yml publica e assina, então eleva packages e id-token. Deixou de precisar de
+    // contents: write quando a criação de release saiu para a etapa de promoção.
     expect(cd).toContain('packages: write');
     expect(cd).toContain('id-token: write');
-    expect(cd).toContain('contents: write');
+    expect(cd).not.toContain('contents: write');
     expect(permissoesDoWorkflow('cd.yml')).not.toContain(': write');
   });
 

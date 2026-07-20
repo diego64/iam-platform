@@ -70,18 +70,28 @@ describe('severidade bloqueante do scan', () => {
   });
 });
 
-describe('o deploy só ocorre depois da cadeia completa', () => {
-  it('todo caminho até o deploy passa por scan e assinatura', () => {
-    const visitados = new Set<string>();
-    const fila = [...needsDe('deploy')];
-    while (fila.length > 0) {
-      const atual = fila.shift();
-      if (atual === undefined || visitados.has(atual)) continue;
-      visitados.add(atual);
-      fila.push(...needsDe(atual));
-    }
+describe('o cd.yml não implanta', () => {
+  it('não contém job de deploy, backup, migração ou release', () => {
+    // Sem homologação, a aprovação humana é a única barreira antes do tráfego. Se o
+    // cd.yml voltar a implantar, um merge na main vai direto para produção sem que
+    // ninguém tenha aprovado — a barreira deixa de existir sem nenhum aviso.
+    const jobs = [...CD.matchAll(/^ {2}([a-z][a-z0-9-]*):$/gm)].map((m) => m[1]);
 
-    expect(visitados).toContain('trivy-scan');
-    expect(visitados).toContain('cosign-sign');
+    for (const proibido of ['deploy', 'backup', 'validate-migration', 'create-release']) {
+      expect(jobs).not.toContain(proibido);
+    }
+  });
+
+  it('termina no job que declara o digest elegível', () => {
+    const jobs = [...CD.matchAll(/^ {2}([a-z][a-z0-9-]*):$/gm)].map((m) => m[1]);
+
+    expect(jobs).toContain('publicar-elegivel');
+  });
+
+  it('não referencia secret de banco nem do Render', () => {
+    // A promoção é que precisa deles, atrás da aprovação.
+    for (const secret of ['POSTGRES_URL', 'MONGODB_URL', 'RENDER_']) {
+      expect(CD).not.toContain(secret);
+    }
   });
 });
