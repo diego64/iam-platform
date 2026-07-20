@@ -1,5 +1,5 @@
 /**
- * Erro de domínio do módulo de senha. O controller (T11) mapeia `codigo` para o status
+ * Erro de domínio do módulo de senha. O controller da rota mapeia `codigo` para o status
  * RFC 7807 correspondente; o serviço nunca conhece HTTP.
  *
  * As mensagens de credencial e de token são genéricas de propósito — a distinção real

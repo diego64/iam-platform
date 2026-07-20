@@ -111,7 +111,8 @@ function decodificar(hashArmazenado: string): HashDecodificado | null {
 /**
  * Cria o serviço de senha com os parâmetros de custo informados.
  *
- * Recebe os parâmetros por injeção — a fábrica que lê env e monta isso é da T02.
+ * Recebe os parâmetros por injeção — a fábrica que os lê da configuração está mais abaixo
+ * (`criarServicoDeSenhaDaEnv`).
  */
 export function criarServicoDeSenha(params: ParametrosScrypt): ServicoDeSenha {
   async function gerarHash(senha: string): Promise<string> {
@@ -139,7 +140,8 @@ export function criarServicoDeSenha(params: ParametrosScrypt): ServicoDeSenha {
       if (decodificado === null) return false;
 
       // Rederiva com os parâmetros DO HASH, não os correntes: um hash antigo, de custo
-      // menor, ainda precisa verificar — o re-hash para o custo novo é oportunista (T02).
+      // menor, ainda precisa verificar — o re-hash para o custo novo acontece de forma
+      // oportunista, no próximo login bem-sucedido.
       const candidato = await derivar(senha, decodificado.salt, decodificado.params);
 
       // Comprimentos iguais por construção (ambos 64 bytes); o guard protege o

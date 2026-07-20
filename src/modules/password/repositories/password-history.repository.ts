@@ -1,7 +1,8 @@
 /**
  * Responsabilidade: histórico de hashes de senha em PostgreSQL (tabela password_history).
  * Consumido por: o PasswordService, via porta `RepositorioDeHistoricoDeSenha`.
- * Regras: recebe o `Pool` por injeção (ADR-0001); guarda só hashes, nunca a senha.
+ * Regras: recebe o `Pool` por injeção — nunca importa um singleton de conexão; guarda
+ *         só hashes, nunca a senha.
  */
 import type { Pool } from 'pg';
 import type { RepositorioDeHistoricoDeSenha } from '../interfaces/historico.port.js';

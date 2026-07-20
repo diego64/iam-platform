@@ -1,9 +1,9 @@
 /**
  * Porta de acesso ao usuário, do ponto de vista de quem gerencia senha.
  *
- * A 009 precede a 002 no roadmap: define esta interface e roda contra um fake; a 002
- * injeta o concreto sobre a tabela `users`. Expõe só o que o domínio de senha precisa —
- * não é o repositório de usuário inteiro.
+ * O gerenciamento de senha é implementado antes do CRUD de usuário: define esta interface
+ * e roda contra um fake; o concreto sobre a tabela `users` chega com o módulo de usuário.
+ * Expõe só o que o domínio de senha precisa — não é o repositório de usuário inteiro.
  */
 export interface UsuarioParaSenha {
   readonly id: string;

@@ -1,14 +1,14 @@
 /**
  * Responsabilidade: a política de força de senha, como regra de DOMÍNIO — sem Zod.
  * Consumido por: o schema `senhaForte` (borda HTTP) e o PasswordService (defesa em
- * profundidade, para o caminho interno da 002 que não passa por rota).
+ * profundidade, para o caminho interno de criação de usuário que não passa por rota HTTP).
  * Regras:
  *  - Não importa Zod nem Fastify (regra de dependência do CLAUDE.md).
  *  - Nunca ecoa a senha na mensagem — só o motivo da rejeição.
  */
 import { estaNaBlocklist } from '../constants/blocklist.js';
 
-/** Parâmetros públicos da política, expostos por `GET /auth/password/policy` (T11). */
+/** Parâmetros públicos da política, expostos pela rota `GET /auth/password/policy`. */
 export const POLITICA = {
   comprimentoMinimo: 12,
   comprimentoMaximo: 128,

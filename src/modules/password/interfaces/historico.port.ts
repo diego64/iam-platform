@@ -1,5 +1,5 @@
 /**
- * Porta do histórico de hashes de senha (RF-12, bloqueio de reuso).
+ * Porta do histórico de hashes de senha, usada para bloquear o reuso das últimas N senhas.
  *
  * Concreto sobre a tabela `password_history` (migração 0003). Definida como porta para o
  * PasswordService ser testável com um fake em memória, sem PG.

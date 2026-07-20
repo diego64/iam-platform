@@ -56,6 +56,10 @@ export async function montarAppDeSenha(opcoes: {
     transform: jsonSchemaTransform,
   });
 
+  // Opt-in por rota: cada rota de senha declara seu próprio teto em `config.rateLimit`;
+  // rotas sem essa config não são limitadas.
+  await app.register((await import('@fastify/rate-limit')).default, { global: false });
+
   app.setErrorHandler((erro: FastifyError, _req, resposta) => {
     if (hasZodFastifySchemaValidationErrors(erro)) {
       void resposta

@@ -1,7 +1,7 @@
 /**
  * Responsabilidade: o refinement Zod da senha, para a borda HTTP.
- * Consumido por: `routes/`/`controllers/` desta SPEC e reexportado para a 002 usar na
- * criação de usuário.
+ * Consumido por: as `routes/`/`controllers/` de senha e reexportado para o módulo de
+ * usuário aplicar a mesma regra na criação de usuário.
  * Regras:
  *  - Delega a regra ao validador de domínio (`avaliarPolitica`) — o Zod é só o adaptador
  *    de borda, a política mora no domínio e não é duplicada aqui.

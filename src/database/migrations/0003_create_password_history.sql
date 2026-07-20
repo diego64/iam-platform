@@ -1,4 +1,4 @@
--- SPEC 009 — histórico de hashes de senha para bloqueio de reuso (RF-12).
+-- Histórico de hashes de senha, para bloquear o reuso das últimas N senhas.
 -- Guarda apenas hashes (formato scrypt$...), nunca a senha em claro. A coluna
 -- users.password_hash guarda a senha corrente; esta tabela guarda as anteriores.
 CREATE TABLE IF NOT EXISTS password_history (

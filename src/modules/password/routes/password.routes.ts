@@ -9,6 +9,7 @@ import {
   type DependenciasDoController,
 } from '../controllers/password.controller.js';
 import { esqueciSenhaBody, resetSenhaBody, trocarSenhaBody } from '../schemas/password.schema.js';
+import { LIMITE_CHANGE, LIMITE_FORGOT, LIMITE_RESET } from '../hooks/password-rate-limit.js';
 
 export function registrarRotasDeSenha(app: FastifyInstance, deps: DependenciasDoController): void {
   const tipado = app.withTypeProvider<ZodTypeProvider>();
@@ -23,6 +24,7 @@ export function registrarRotasDeSenha(app: FastifyInstance, deps: DependenciasDo
         security: [{ BearerAuth: [] }],
         body: trocarSenhaBody,
       },
+      config: { rateLimit: LIMITE_CHANGE },
     },
     (requisicao, resposta) => controller.trocar(requisicao, resposta),
   );
@@ -36,6 +38,7 @@ export function registrarRotasDeSenha(app: FastifyInstance, deps: DependenciasDo
         security: [],
         body: esqueciSenhaBody,
       },
+      config: { rateLimit: LIMITE_FORGOT },
     },
     (requisicao, resposta) => controller.esqueci(requisicao, resposta),
   );
@@ -49,6 +52,7 @@ export function registrarRotasDeSenha(app: FastifyInstance, deps: DependenciasDo
         security: [],
         body: resetSenhaBody,
       },
+      config: { rateLimit: LIMITE_RESET },
     },
     (requisicao, resposta) => controller.reset(requisicao, resposta),
   );

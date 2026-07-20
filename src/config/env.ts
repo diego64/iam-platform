@@ -37,7 +37,7 @@ export const esquemaEnv = z.object({
   // requisição concluindo "fora" sem saber por quê — pior que um 503 dizendo qual caiu.
   HEALTH_TIMEOUT_MS: z.coerce.number().int().min(100).max(5_000).default(1_000),
 
-  // Parâmetros do scrypt (SPEC 009). O custo é o N do scrypt e precisa ser potência de 2
+  // Parâmetros do scrypt para hash de senha. O custo é o N do scrypt e precisa ser potência de 2
   // — o refinement rejeita valores intermediários, que o scrypt aceitaria em silêncio com
   // custo real menor que o pretendido. Default = 2^15, o baseline do CLAUDE.md.
   SCRYPT_COST: z.coerce

@@ -1,6 +1,6 @@
 /**
  * Responsabilidade: os fluxos de troca, esqueci e reset de senha — a lógica de domínio da
- * SPEC 009. Orquestra hash, política, token de reset, histórico, revogação de sessão e
+ * gerenciamento de senha. Orquestra hash, política, token de reset, histórico, revogação de sessão e
  * notificação, todos por injeção.
  * Regras:
  *  - Não conhece Fastify nem drivers de banco: recebe portas e serviços prontos.
@@ -28,7 +28,7 @@ export interface DependenciasDeSenha {
   readonly notificacao: CanalDeNotificacao;
   /** Validade do token de reset, em minutos. */
   readonly ttlResetMin: number;
-  /** Quantas senhas anteriores bloquear no reuso (RF-12). */
+  /** Quantas senhas anteriores bloquear, para impedir que o usuário volte a uma recente. */
   readonly historicoN: number;
 }
 
@@ -48,10 +48,11 @@ export function criarPasswordService(deps: DependenciasDeSenha): PasswordService
   }
 
   /**
-   * Lança `reuso` se a nova senha é igual à atual (RF-11) ou a uma das últimas N (RF-12).
+   * Lança `reuso` se a nova senha é igual à atual ou a uma das últimas N já usadas.
    *
    * Cada comparação é um `scrypt` — a checagem de histórico custa N derivações. É a razão
-   * de o caminho de troca ser mais pesado que um hash único; ver a nota de RNF no PR.
+   * de o caminho de troca ser mais pesado que um hash único: um SLO de latência para a
+   * troca precisa contar essas N derivações, não só a geração do novo hash.
    */
   async function exigirNaoReuso(
     userId: string,

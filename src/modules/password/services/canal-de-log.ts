@@ -1,5 +1,5 @@
 /**
- * Responsabilidade: canal de notificação de reset em log — o fallback até a 019 entregar
+ * Responsabilidade: canal de notificação de reset em log — o fallback até existir entrega
  * e-mail de verdade.
  * Regras:
  *  - **Não loga o token.** O token é a credencial de reset; registrá-lo no log o retém
@@ -11,7 +11,7 @@ import type { Logger } from '../../../shared/logger/index.js';
 import type { CanalDeNotificacao } from '../interfaces/notificacao.port.js';
 
 /**
- * Cria o canal de log-fallback. Substituível pelo canal de e-mail da 019 sem tocar no
+ * Cria o canal de log-fallback. Substituível pelo canal de e-mail real sem tocar no
  * PasswordService — é a mesma porta.
  */
 export function criarCanalDeLog(logger: Logger): CanalDeNotificacao {
@@ -19,7 +19,7 @@ export function criarCanalDeLog(logger: Logger): CanalDeNotificacao {
     enviarReset(email: string): Promise<void> {
       logger.warn(
         { email, canal: 'log-fallback' },
-        'password.reset.sem_canal_real — token gerado mas nenhum canal de entrega configurado (SPEC 019)',
+        'password.reset.sem_canal_real — token gerado mas nenhum canal de entrega de e-mail configurado',
       );
       return Promise.resolve();
     },
