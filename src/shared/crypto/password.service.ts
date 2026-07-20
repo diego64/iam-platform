@@ -37,6 +37,14 @@ export interface ServicoDeSenha {
    * `true`: o formato mudou, precisa ser regravado.
    */
   precisaRehash(hashArmazenado: string): boolean;
+  /**
+   * Um hash real, de custo corrente, gerado a partir de segredo aleatório — nenhuma senha
+   * o verifica como `true`. A 001 compara contra ele quando o usuário não existe, para o
+   * caminho "não existe" pagar exatamente o mesmo tempo do caminho legítimo e não
+   * denunciar a ausência por timing. Gerado uma vez e reusado; um `setTimeout` fingindo o
+   * custo seria frágil e mensurável, um hash real tem a distribuição de tempo certa.
+   */
+  hashFantasma(): Promise<string>;
 }
 
 const PREFIXO = 'scrypt';
@@ -106,19 +114,25 @@ function decodificar(hashArmazenado: string): HashDecodificado | null {
  * Recebe os parâmetros por injeção — a fábrica que lê env e monta isso é da T02.
  */
 export function criarServicoDeSenha(params: ParametrosScrypt): ServicoDeSenha {
+  async function gerarHash(senha: string): Promise<string> {
+    const salt = randomBytes(TAMANHO_SALT);
+    const hash = await derivar(senha, salt, params);
+    return [
+      PREFIXO,
+      params.custo,
+      params.blocos,
+      params.paralelismo,
+      salt.toString('base64'),
+      hash.toString('base64'),
+    ].join('$');
+  }
+
+  // Cacheia a PROMESSA, não o valor: a primeira chamada dispara o hash e as demais
+  // aguardam a mesma, sem gerar vários fantasmas nem serializar chamadas concorrentes.
+  let fantasma: Promise<string> | undefined;
+
   return {
-    async gerarHash(senha: string): Promise<string> {
-      const salt = randomBytes(TAMANHO_SALT);
-      const hash = await derivar(senha, salt, params);
-      return [
-        PREFIXO,
-        params.custo,
-        params.blocos,
-        params.paralelismo,
-        salt.toString('base64'),
-        hash.toString('base64'),
-      ].join('$');
-    },
+    gerarHash,
 
     async verificar(senha: string, hashArmazenado: string): Promise<boolean> {
       const decodificado = decodificar(hashArmazenado);
@@ -146,6 +160,12 @@ export function criarServicoDeSenha(params: ParametrosScrypt): ServicoDeSenha {
         atual.blocos !== params.blocos ||
         atual.paralelismo !== params.paralelismo
       );
+    },
+
+    hashFantasma(): Promise<string> {
+      // Segredo aleatório de 32 bytes: nenhuma senha real vai colidir com ele.
+      fantasma ??= gerarHash(randomBytes(32).toString('base64'));
+      return fantasma;
     },
   };
 }

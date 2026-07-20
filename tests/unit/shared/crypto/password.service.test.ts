@@ -106,6 +106,31 @@ describe('parametrosDaEnv', () => {
   });
 });
 
+describe('hashFantasma', () => {
+  it('é um hash válido no formato scrypt, de custo corrente', async () => {
+    const fantasma = await servico.hashFantasma();
+    const partes = fantasma.split('$');
+
+    expect(partes[0]).toBe('scrypt');
+    expect(partes[1]).toBe(String(2 ** 14));
+    expect(servico.precisaRehash(fantasma)).toBe(false);
+  });
+
+  it('nenhuma senha o verifica como true', async () => {
+    const fantasma = await servico.hashFantasma();
+
+    expect(await servico.verificar('', fantasma)).toBe(false);
+    expect(await servico.verificar('tentativa', fantasma)).toBe(false);
+  });
+
+  it('é estável entre chamadas (gerado uma vez, reusado)', async () => {
+    const a = await servico.hashFantasma();
+    const b = await servico.hashFantasma();
+
+    expect(a).toBe(b);
+  });
+});
+
 describe('maxmem no custo de produção', () => {
   it('não aborta com N=2^15, r=8 — onde o teto default do Node estoura', async () => {
     // Este caso roda no custo REAL de propósito: é o único que exercita o maxmem
