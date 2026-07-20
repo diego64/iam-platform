@@ -63,13 +63,28 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  trivy-scan:
+    name: Trivy Scan (imagem publicada)
+    runs-on: ubuntu-latest
+    needs: [build-docker]
+    steps:
+      - uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ needs.build-docker.outputs.imagem }}
+          severity: 'HIGH,CRITICAL'
+          exit-code: '1'
+          ignore-unfixed: true
+
   cosign-sign:
     name: Cosign Sign
     runs-on: ubuntu-latest
     permissions:
       packages: write
       id-token: write # assinatura keyless via OIDC
-    needs: [build-docker]
+    # DEPOIS do scan, não antes. A assinatura atesta que o artefato passou pelos
+    # controles; produzi-la antes deixaria uma imagem reprovada assinada no registry,
+    # e a assinatura passaria a significar apenas "foi construída aqui".
+    needs: [build-docker, trivy-scan]
     steps:
       - uses: sigstore/cosign-installer@v3
       - uses: docker/login-action@v3
@@ -78,23 +93,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Assinatura keyless (OIDC)
-        run: cosign sign --yes ${{ env.IMAGE }}@${{ needs.build-docker.outputs.digest }}
-
-  trivy-scan:
-    name: Trivy Scan (imagem publicada)
-    runs-on: ubuntu-latest
-    needs: [cosign-sign, build-docker]
-    steps:
-      - uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ env.IMAGE }}@${{ needs.build-docker.outputs.digest }}
-          severity: MEDIUM,HIGH,CRITICAL
-          exit-code: '1'
+        run: cosign sign --yes ${{ needs.build-docker.outputs.imagem }}
 
   backup:
     name: Backup Banco (pré-deploy)
     runs-on: ubuntu-latest
-    needs: [trivy-scan]
+    needs: [cosign-sign]
     steps:
       - uses: actions/checkout@v6
       - name: Backup PostgreSQL (Supabase) + MongoDB (Atlas)

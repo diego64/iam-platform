@@ -60,12 +60,17 @@ describe('nenhuma tag mutável é publicada', () => {
 });
 
 describe('referência por digest nos jobs de entrega', () => {
-  it('os jobs que consomem a imagem usam @digest, não tag', () => {
+  it('os jobs que consomem a imagem referenciam saída imutável, nunca tag', () => {
     const cd = ler('cd.yml');
-    // Toda referência a needs.build-docker deve trazer o digest junto.
     const referencias = [...cd.matchAll(/needs\.build-docker\.outputs\.(\w+)/g)].map((m) => m[1]);
 
-    expect(referencias).toContain('digest');
+    // `imagem` já é IMAGE@sha256:...; `digest` é o sha puro. Ambas são imutáveis.
+    // `version` é rótulo, não referência de imagem. O que não pode aparecer é `tags`,
+    // que aponta para nome mutável.
+    const referenciasDeImagem = referencias.filter((r) => r !== 'version');
+    const imutaveis = referenciasDeImagem.filter((r) => r === 'imagem' || r === 'digest');
+
+    expect(imutaveis).toEqual(referenciasDeImagem);
     expect(referencias).not.toContain('tags');
   });
 
