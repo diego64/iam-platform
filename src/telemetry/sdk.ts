@@ -11,11 +11,13 @@
  *    métodos deixaria de acontecer — sem erro, sem span, sem aviso.
  */
 import { createRequire } from 'node:module';
+import { diag, DiagLogLevel } from '@opentelemetry/api';
 import { NodeSDK, resources, tracing } from '@opentelemetry/sdk-node';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { PrometheusExporter, PrometheusSerializer } from '@opentelemetry/exporter-prometheus';
 import { carregarConfigDeTelemetria, type ConfigDeTelemetria } from '../config/env.js';
+import { criarLogger, type Logger } from '../shared/logger/index.js';
 import { ROTAS_ISENTAS } from './rotas-isentas.js';
 
 export interface Telemetria {
@@ -29,6 +31,52 @@ export interface Telemetria {
   readonly exportadorPrometheus?: PrometheusExporter;
   /** Descarrega o que estiver em buffer e derruba o SDK. Nunca rejeita. */
   encerrar(): Promise<void>;
+}
+
+/** Janela de agregação das falhas de exportação. */
+const INTERVALO_DE_AGREGACAO_MS = 60_000;
+
+/**
+ * Concentra as falhas de exportação numa linha por minuto.
+ *
+ * O OTel reporta cada falha pelo `diag`, e um Collector fora produz uma por lote, sem
+ * parar. Repassadas uma a uma, elas enterrariam o resto do log justamente durante o
+ * incidente em que alguém precisa lê-lo — a telemetria viraria o problema.
+ *
+ * Devolve a função que desarma o agregador.
+ */
+function agregarFalhasDeExportacao(logger: Logger): () => void {
+  let falhas = 0;
+  const silencio = (): void => undefined;
+
+  diag.setLogger(
+    {
+      error: () => {
+        falhas += 1;
+      },
+      warn: () => {
+        falhas += 1;
+      },
+      info: silencio,
+      debug: silencio,
+      verbose: silencio,
+    },
+    DiagLogLevel.WARN,
+  );
+
+  const relogio = setInterval(() => {
+    if (falhas === 0) return;
+    logger.warn({ falhas, janela_ms: INTERVALO_DE_AGREGACAO_MS }, 'telemetria.exportacao_falhou');
+    falhas = 0;
+  }, INTERVALO_DE_AGREGACAO_MS);
+
+  // Sem unref, este timer sozinho manteria o processo vivo depois do shutdown.
+  relogio.unref();
+
+  return () => {
+    clearInterval(relogio);
+    diag.disable();
+  };
 }
 
 /** Handle inerte — usado quando nada foi ligado, para o resto do código não ramificar. */
@@ -78,6 +126,7 @@ function instrumentacoes(): ReturnType<typeof getNodeAutoInstrumentations> {
  */
 export function iniciarTelemetria(
   config: ConfigDeTelemetria = carregarConfigDeTelemetria(),
+  logger: Logger = criarLogger({ nivel: 'warn' }),
 ): Telemetria {
   const metricas = config.METRICS_ENABLED;
   const traces = config.OTEL_EXPORTER_OTLP_ENDPOINT !== undefined;
@@ -145,6 +194,7 @@ export function iniciarTelemetria(
     });
 
     sdk.start();
+    const desarmarAgregador = agregarFalhasDeExportacao(logger);
 
     return {
       ativa: true,
@@ -152,6 +202,7 @@ export function iniciarTelemetria(
       traces,
       ...(exportadorPrometheus === undefined ? {} : { exportadorPrometheus }),
       encerrar: async () => {
+        desarmarAgregador();
         // Nunca rejeita: o encerramento do processo não pode travar porque o Collector
         // não respondeu ao último flush.
         await sdk.shutdown().catch(() => undefined);
