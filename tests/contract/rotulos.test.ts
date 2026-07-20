@@ -17,7 +17,7 @@ import {
 import { criarInstrumentos } from '../../src/telemetry/metricas.js';
 import { esquemaTelemetria } from '../../src/config/env.js';
 
-/** Rótulos previstos em `specs/015-observability/api.md`. Nada além disso pode aparecer. */
+/** Rótulos previstos. Nada além disso pode aparecer. */
 const ROTULOS_PERMITIDOS = new Set([
   'method',
   'route',
