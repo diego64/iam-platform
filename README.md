@@ -72,6 +72,21 @@ boot (`src/config/env.ts`): faltando ou malformada qualquer obrigatória, o proc
 sai com código 1 antes de abrir socket, listando o que corrigir. Ver
 `docs/decisions/adr-0004-zod-config-boundary.md`.
 
+## Entrega
+
+O pipeline está documentado em [`docs/ci-cd.md`](docs/ci-cd.md), incluindo o runbook de
+incidente. Em resumo:
+
+| Etapa                    | Gatilho                                | Barreira                                |
+| ------------------------ | -------------------------------------- | --------------------------------------- |
+| Verificação              | pull request                           | checks verdes bloqueiam o merge         |
+| Build, scan e assinatura | merge na `main`                        | automático                              |
+| **Deploy em produção**   | manual                                 | **aprovação no Environment `producao`** |
+| Rollback                 | manual ou automático em falha de smoke | aprovação                               |
+
+Não há ambiente de homologação: o smoke em produção é a primeira execução do artefato
+contra infraestrutura real, e a aprovação humana é a única barreira antes do tráfego.
+
 ## Contribuindo
 
 Nenhum código é escrito sem SPEC aprovada. Gates obrigatórios antes de qualquer PR:

@@ -1,0 +1,25 @@
+name: Verify Actions
+
+# Resolve toda referência `uses:` contra a API do GitHub. Uma action inexistente só
+# falharia dentro do runner, com mensagem que não diz que a versão não existe.
+on:
+  pull_request:
+    paths: ['.github/workflows/**']
+  push:
+    branches: [main]
+    paths: ['.github/workflows/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify Actions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Resolver refs das actions
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/verify-actions.sh

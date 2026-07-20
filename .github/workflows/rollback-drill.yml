@@ -1,0 +1,119 @@
+name: Ensaio de Rollback
+
+# Rollback que nunca rodou não é plano de contingência, é esperança.
+#
+# Sem ambiente de homologação, não existe lugar seguro para ensaiar — então o ensaio
+# acontece em produção, em janela combinada e fora do pico. O procedimento é reverter
+# para o digest anterior, confirmar, e voltar para o atual, confirmando de novo.
+#
+# O risco é real e assumido: se a volta falhar, produção fica na versão anterior. Por
+# isso o ensaio exige aprovação como qualquer promoção, e aborta ao primeiro smoke que
+# reprovar, em vez de insistir.
+on:
+  schedule:
+    # Terças, 06:00 UTC — 03:00 no horário de Brasília, fora do pico.
+    - cron: '0 6 * * 2'
+  workflow_dispatch:
+    inputs:
+      confirmar:
+        description: 'Digite ENSAIAR para confirmar que a janela está combinada'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# Mesmo grupo da promoção: ensaio e deploy nunca podem se cruzar.
+concurrency:
+  group: promocao-producao
+  cancel-in-progress: false
+
+jobs:
+  ensaiar:
+    name: Ensaiar reversão e retorno
+    runs-on: ubuntu-latest
+    environment: producao
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Exigir confirmação explícita no disparo manual
+        if: github.event_name == 'workflow_dispatch' && inputs.confirmar != 'ENSAIAR'
+        run: |
+          echo "::error::Ensaio mexe em produção. Confirme com ENSAIAR." >&2
+          exit 2
+
+      - uses: actions/checkout@v6
+      - uses: sigstore/cosign-installer@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: atual
+        name: Descobrir o digest em produção
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+        run: |
+          atual=$(curl -fsS "https://api.render.com/v1/services/${RENDER_SERVICE_ID}" \
+            -H "Authorization: Bearer ${RENDER_API_KEY}" \
+            | sed -n 's/.*"imagePath"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+          if [[ -z "${atual}" ]]; then
+            echo "::error::Não foi possível descobrir a imagem atual. Ensaio abortado." >&2
+            exit 3
+          fi
+          echo "atual=${atual}" >> "$GITHUB_OUTPUT"
+
+      - id: anterior
+        name: Descobrir o digest anterior no registry
+        run: |
+          # Penúltima tag sha- publicada. Se não houver duas versões, não há o que
+          # ensaiar — abortar aqui é melhor que reverter para algo arbitrário.
+          anterior=$(gh api "/user/packages/container/iam-platform/versions" \
+            --jq '[.[] | select(.metadata.container.tags[]? | startswith("sha-"))]
+                  | sort_by(.created_at) | reverse | .[1].name' 2>/dev/null || echo '')
+          if [[ -z "${anterior}" || "${anterior}" == "null" ]]; then
+            echo "::warning::Sem versão anterior publicada; nada a ensaiar."
+            echo "pular=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "anterior=ghcr.io/${{ github.repository }}@${anterior}" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Reverter para o anterior
+        if: steps.anterior.outputs.pular != 'true'
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+          BASE_URL: ${{ secrets.BASE_URL }}
+        run: bash scripts/rollback.sh "${{ steps.anterior.outputs.anterior }}"
+
+      - name: Voltar para o digest corrente
+        # `always()` aqui é deliberado: se a reversão passou mas algo depois falhou,
+        # deixar produção na versão antiga seria pior que tentar voltar.
+        if: always() && steps.anterior.outputs.pular != 'true'
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+          BASE_URL: ${{ secrets.BASE_URL }}
+        run: bash scripts/rollback.sh "${{ steps.atual.outputs.atual }}"
+
+      - name: Resumo
+        if: always()
+        run: |
+          {
+            echo "## Ensaio de rollback"
+            echo
+            echo "| Campo | Valor |"
+            echo "|---|---|"
+            echo "| corrente | \`${{ steps.atual.outputs.atual }}\` |"
+            echo "| ensaiado | \`${{ steps.anterior.outputs.anterior }}\` |"
+            echo "| resultado | ${{ job.status }} |"
+            echo
+            if [[ "${{ job.status }}" != "success" ]]; then
+              echo "**Verifique manualmente qual versão está servindo tráfego.**"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

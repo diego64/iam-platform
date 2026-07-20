@@ -6,12 +6,13 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  packages: write
-  id-token: write # Cosign keyless
+  contents: read
 
+# Um build por vez na main, sem cancelar: cada commit precisa produzir seu digest,
+# e cancelar o anterior deixaria um commit da main sem artefato correspondente.
+# O grupo não é o da promoção — este workflow não toca em produção.
 concurrency:
-  group: cd-producao
+  group: entrega-main
   cancel-in-progress: false
 
 env:
@@ -21,8 +22,13 @@ jobs:
   build-docker:
     name: Build Docker
     runs-on: ubuntu-latest
+    permissions:
+      packages: write
     outputs:
+      # Identidade imutável do artefato: TODO job seguinte referencia por aqui.
       digest: ${{ steps.push.outputs.digest }}
+      # Referência completa, pronta para uso — evita recompor a string em cada job.
+      imagem: ${{ env.IMAGE }}@${{ steps.push.outputs.digest }}
       version: ${{ steps.meta.outputs.version }}
     steps:
       - uses: actions/checkout@v6
@@ -36,9 +42,18 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.IMAGE }}
+          # `latest` NÃO é publicado. Tag mutável torna o rollback não determinístico:
+          # o que estava rodando deixa de ser recuperável, porque o ponteiro já andou.
+          # A promoção referencia digest; a tag sha- serve só para leitura humana.
           tags: |
-            type=sha,prefix=
-            type=raw,value=latest
+            type=sha,prefix=sha-
+      - name: Confirmar que nenhuma tag mutável foi gerada
+        run: |
+          if echo '${{ steps.meta.outputs.tags }}' | grep -qE '(:latest|:main|:stable)$'; then
+            echo "Tag mutável gerada: ${{ steps.meta.outputs.tags }}" >&2
+            exit 1
+          fi
+          echo "Tags: ${{ steps.meta.outputs.tags }}"
       - id: push
         name: Push GHCR
         uses: docker/build-push-action@v6
@@ -51,10 +66,28 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  trivy-scan:
+    name: Trivy Scan (imagem publicada)
+    runs-on: ubuntu-latest
+    needs: [build-docker]
+    steps:
+      - uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ needs.build-docker.outputs.imagem }}
+          severity: 'HIGH,CRITICAL'
+          exit-code: '1'
+          ignore-unfixed: true
+
   cosign-sign:
     name: Cosign Sign
     runs-on: ubuntu-latest
-    needs: [build-docker]
+    permissions:
+      packages: write
+      id-token: write # assinatura keyless via OIDC
+    # DEPOIS do scan, não antes. A assinatura atesta que o artefato passou pelos
+    # controles; produzi-la antes deixaria uma imagem reprovada assinada no registry,
+    # e a assinatura passaria a significar apenas "foi construída aqui".
+    needs: [build-docker, trivy-scan]
     steps:
       - uses: sigstore/cosign-installer@v3
       - uses: docker/login-action@v3
@@ -63,98 +96,41 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Assinatura keyless (OIDC)
-        run: cosign sign --yes ${{ env.IMAGE }}@${{ needs.build-docker.outputs.digest }}
+        run: cosign sign --yes ${{ needs.build-docker.outputs.imagem }}
 
-  trivy-scan:
-    name: Trivy Scan (imagem publicada)
+  publicar-elegivel:
+    name: Digest elegível para promoção
     runs-on: ubuntu-latest
-    needs: [cosign-sign, build-docker]
+    needs: [build-docker, trivy-scan, cosign-sign]
     steps:
-      - uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ env.IMAGE }}@${{ needs.build-docker.outputs.digest }}
-          severity: MEDIUM,HIGH,CRITICAL
-          exit-code: '1'
-
-  backup:
-    name: Backup Banco (pré-deploy)
-    runs-on: ubuntu-latest
-    needs: [trivy-scan]
-    steps:
-      - uses: actions/checkout@v6
-      - name: Backup PostgreSQL (Supabase) + MongoDB (Atlas)
-        env:
-          POSTGRES_URL: ${{ secrets.PROD_POSTGRES_URL }}
-          MONGODB_URL: ${{ secrets.PROD_MONGODB_URL }}
-        run: bash scripts/backup.sh
-
-  validate-migration:
-    name: Validar Migration
-    runs-on: ubuntu-latest
-    needs: [backup]
-    steps:
-      - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v6
-        with: { node-version: 22, cache: pnpm }
-      - run: pnpm install --frozen-lockfile
-      - name: Dry-run das migrations contra o banco de produção
-        env:
-          POSTGRES_URL: ${{ secrets.PROD_POSTGRES_URL }}
-        run: pnpm migrate -- --dry-run
-
-  deploy:
-    name: Deploy (Render)
-    runs-on: ubuntu-latest
-    needs: [validate-migration]
-    environment: production
-    steps:
-      - name: Disparar deploy no Render
+      - name: Registrar o artefato aprovado
         run: |
-          curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+          {
+            echo "## Artefato elegível para promoção"
+            echo
+            echo "| Campo | Valor |"
+            echo "|---|---|"
+            echo "| digest | \`${{ needs.build-docker.outputs.digest }}\` |"
+            echo "| imagem | \`${{ needs.build-docker.outputs.imagem }}\` |"
+            echo "| versão | ${{ needs.build-docker.outputs.version }} |"
+            echo "| commit | ${{ github.sha }} |"
+            echo
+            echo "Construído, escaneado e assinado. **Nenhum deploy acontece aqui**:"
+            echo "a promoção exige aprovação humana em \`promote.yml\`."
+          } >> "$GITHUB_STEP_SUMMARY"
 
-  smoke-test:
-    name: Smoke Test
-    runs-on: ubuntu-latest
-    needs: [deploy]
-    steps:
-      - uses: actions/checkout@v6
-      - name: Aguardar e validar endpoints críticos
-        env:
-          BASE_URL: ${{ secrets.PROD_BASE_URL }}
-        run: bash scripts/healthcheck.sh "$BASE_URL" --smoke
-
-  health-check:
-    name: Health Check
-    runs-on: ubuntu-latest
-    needs: [smoke-test]
-    steps:
-      - uses: actions/checkout@v6
-      - env:
-          BASE_URL: ${{ secrets.PROD_BASE_URL }}
-        run: bash scripts/healthcheck.sh "$BASE_URL"
-
-  create-release:
-    name: Criar Release
-    runs-on: ubuntu-latest
-    needs: [health-check, build-docker]
-    steps:
-      - uses: actions/checkout@v6
-        with: { fetch-depth: 0 }
-      - name: Criar tag de release (dispara release.yml)
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          VERSION=$(node -p "require('./package.json').version")
-          git tag -f "v${VERSION}"
-          git push -f origin "v${VERSION}"
-
-  notify:
+  notificar:
     name: Notificar
     runs-on: ubuntu-latest
-    needs: [create-release]
+    needs: [build-docker, trivy-scan, cosign-sign, publicar-elegivel]
+    # `if: always()` sozinho não basta: com needs no meio da cadeia, o job é *skipped*
+    # quando algo antes falha, e a falha passa silenciosa. Depende de TODOS os jobs.
     if: always()
     steps:
-      - name: Resumo do deploy
+      - name: Resumo
         run: |
-          echo "Deploy de produção finalizado: ${{ needs.create-release.result }}"
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
+            echo "::error::Pipeline de entrega falhou antes de produzir digest elegível."
+            exit 1
+          fi
+          echo "Digest elegível: ${{ needs.build-docker.outputs.digest }}"

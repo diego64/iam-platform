@@ -6,21 +6,53 @@ on:
     types: [published]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   sbom:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v6
+
+      - id: versao
+        name: Resolver versão e digest da imagem correspondente
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          versao="${{ github.event.release.tag_name || github.ref_name }}"
+          echo "versao=${versao}" >> "$GITHUB_OUTPUT"
+          # SBOM sem o digest ao lado não diz de QUAL artefato ele é — e é exatamente
+          # isso que se pergunta ao auditar uma versão específica meses depois.
+          digest=$(docker manifest inspect "ghcr.io/${{ github.repository }}:${versao}" 2>/dev/null \
+            | sed -n 's/.*"digest"[[:space:]]*:[[:space:]]*"\(sha256:[a-f0-9]*\)".*/\1/p' | head -1)
+          echo "digest=${digest:-desconhecido}" >> "$GITHUB_OUTPUT"
+
       - uses: anchore/sbom-action@v0
-        with: { format: spdx-json, output-file: sbom.spdx.json }
+        with:
+          format: spdx-json
+          output-file: sbom-${{ steps.versao.outputs.versao }}.spdx.json
       - uses: anchore/sbom-action@v0
-        with: { format: cyclonedx-json, output-file: sbom.cdx.json }
+        with:
+          format: cyclonedx-json
+          output-file: sbom-${{ steps.versao.outputs.versao }}.cdx.json
+
       - name: Anexar SBOM à release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v3
         with:
           files: |
-            sbom.spdx.json
-            sbom.cdx.json
+            sbom-${{ steps.versao.outputs.versao }}.spdx.json
+            sbom-${{ steps.versao.outputs.versao }}.cdx.json
+
+      - name: Resumo
+        run: |
+          {
+            echo "## SBOM"
+            echo
+            echo "| Campo | Valor |"
+            echo "|---|---|"
+            echo "| versao | ${{ steps.versao.outputs.versao }} |"
+            echo "| digest | \`${{ steps.versao.outputs.digest }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -6,12 +6,14 @@ on:
   workflow_dispatch:
 
 permissions:
-  actions: write
-  packages: write
+  contents: read
 
 jobs:
   cleanup:
     runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      packages: write
     steps:
       - name: Excluir cache antigo
         uses: actions/github-script@v7
