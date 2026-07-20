@@ -72,6 +72,16 @@ boot (`src/config/env.ts`): faltando ou malformada qualquer obrigatória, o proc
 sai com código 1 antes de abrir socket, listando o que corrigir. Ver
 `docs/decisions/adr-0004-zod-config-boundary.md`.
 
+## Observabilidade
+
+`GET /metrics` em formato Prometheus, traces via OTLP e `trace_id` em todo log de
+requisição. As métricas expostas, como abrir um trace a partir de um log e como desligar
+a telemetria estão em [`docs/observabilidade.md`](docs/observabilidade.md).
+
+> `/metrics` expõe topologia, nomes de rota e volume de tráfego — **não deve ser público**.
+> Em produção o endpoint recusa requisição vinda do proxy externo; abrir exige
+> `METRICS_PUBLIC=true`, uma decisão explícita na configuração.
+
 ## Entrega
 
 O pipeline está documentado em [`docs/ci-cd.md`](docs/ci-cd.md), incluindo o runbook de
