@@ -172,15 +172,16 @@ jobs:
         image: postgres:17-alpine
         env:
           POSTGRES_USER: iam
-          POSTGRES_HOST_AUTH_METHOD: trust
           POSTGRES_DB: iam_test
+          # Container efêmero, isolado no job: senha aqui não protege nada e produz
+          # uma URI com forma de credencial, que o scanner de segredos sinaliza.
+          POSTGRES_HOST_AUTH_METHOD: trust
         ports: ['5432:5432']
         options: >-
           --health-cmd "pg_isready -U iam" --health-interval 5s
           --health-timeout 3s --health-retries 10
       mongodb:
         image: mongo:8
-        env:
         ports: ['27017:27017']
     env:
       POSTGRES_URL: postgresql://iam@localhost:5432/iam_test
@@ -236,15 +237,16 @@ jobs:
         image: postgres:17-alpine
         env:
           POSTGRES_USER: iam
-          POSTGRES_HOST_AUTH_METHOD: trust
           POSTGRES_DB: iam_test
+          # Container efêmero, isolado no job: senha aqui não protege nada e produz
+          # uma URI com forma de credencial, que o scanner de segredos sinaliza.
+          POSTGRES_HOST_AUTH_METHOD: trust
         ports: ['5432:5432']
         options: >-
           --health-cmd "pg_isready -U iam" --health-interval 5s
           --health-timeout 3s --health-retries 10
       mongodb:
         image: mongo:8
-        env:
         ports: ['27017:27017']
     env:
       POSTGRES_URL: postgresql://iam@localhost:5432/iam_test
