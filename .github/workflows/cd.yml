@@ -95,87 +95,39 @@ jobs:
       - name: Assinatura keyless (OIDC)
         run: cosign sign --yes ${{ needs.build-docker.outputs.imagem }}
 
-  backup:
-    name: Backup Banco (pré-deploy)
+  publicar-elegivel:
+    name: Digest elegível para promoção
     runs-on: ubuntu-latest
-    needs: [cosign-sign]
+    needs: [build-docker, trivy-scan, cosign-sign]
     steps:
-      - uses: actions/checkout@v6
-      - name: Backup PostgreSQL (Supabase) + MongoDB (Atlas)
-        env:
-          POSTGRES_URL: ${{ secrets.PROD_POSTGRES_URL }}
-          MONGODB_URL: ${{ secrets.PROD_MONGODB_URL }}
-        run: bash scripts/backup.sh
-
-  validate-migration:
-    name: Validar Migration
-    runs-on: ubuntu-latest
-    needs: [backup]
-    steps:
-      - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v6
-        with: { node-version: 22, cache: pnpm }
-      - run: pnpm install --frozen-lockfile
-      - name: Dry-run das migrations contra o banco de produção
-        env:
-          POSTGRES_URL: ${{ secrets.PROD_POSTGRES_URL }}
-        run: pnpm migrate -- --dry-run
-
-  deploy:
-    name: Deploy (Render)
-    runs-on: ubuntu-latest
-    needs: [validate-migration]
-    environment: production
-    steps:
-      - name: Disparar deploy no Render
+      - name: Registrar o artefato aprovado
         run: |
-          curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+          {
+            echo "## Artefato elegível para promoção"
+            echo
+            echo "| Campo | Valor |"
+            echo "|---|---|"
+            echo "| digest | \`${{ needs.build-docker.outputs.digest }}\` |"
+            echo "| imagem | \`${{ needs.build-docker.outputs.imagem }}\` |"
+            echo "| versão | ${{ needs.build-docker.outputs.version }} |"
+            echo "| commit | ${{ github.sha }} |"
+            echo
+            echo "Construído, escaneado e assinado. **Nenhum deploy acontece aqui**:"
+            echo "a promoção exige aprovação humana em \`promote.yml\`."
+          } >> "$GITHUB_STEP_SUMMARY"
 
-  smoke-test:
-    name: Smoke Test
-    runs-on: ubuntu-latest
-    needs: [deploy]
-    steps:
-      - uses: actions/checkout@v6
-      - name: Aguardar e validar endpoints críticos
-        env:
-          BASE_URL: ${{ secrets.PROD_BASE_URL }}
-        run: bash scripts/healthcheck.sh "$BASE_URL" --smoke
-
-  health-check:
-    name: Health Check
-    runs-on: ubuntu-latest
-    needs: [smoke-test]
-    steps:
-      - uses: actions/checkout@v6
-      - env:
-          BASE_URL: ${{ secrets.PROD_BASE_URL }}
-        run: bash scripts/healthcheck.sh "$BASE_URL"
-
-  create-release:
-    name: Criar Release
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    needs: [health-check, build-docker]
-    steps:
-      - uses: actions/checkout@v6
-        with: { fetch-depth: 0 }
-      - name: Criar tag de release (dispara release.yml)
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          VERSION=$(node -p "require('./package.json').version")
-          git tag -f "v${VERSION}"
-          git push -f origin "v${VERSION}"
-
-  notify:
+  notificar:
     name: Notificar
     runs-on: ubuntu-latest
-    needs: [create-release]
+    needs: [build-docker, trivy-scan, cosign-sign, publicar-elegivel]
+    # `if: always()` sozinho não basta: com needs no meio da cadeia, o job é *skipped*
+    # quando algo antes falha, e a falha passa silenciosa. Depende de TODOS os jobs.
     if: always()
     steps:
-      - name: Resumo do deploy
+      - name: Resumo
         run: |
-          echo "Deploy de produção finalizado: ${{ needs.create-release.result }}"
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
+            echo "::error::Pipeline de entrega falhou antes de produzir digest elegível."
+            exit 1
+          fi
+          echo "Digest elegível: ${{ needs.build-docker.outputs.digest }}"
