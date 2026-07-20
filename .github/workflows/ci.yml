@@ -192,6 +192,9 @@ jobs:
       - uses: actions/setup-node@v6
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
+      # tests/integration/server/bootstrap.test.ts sobe dist/server.js como processo
+      # filho para exercitar os caminhos de saída do boot — precisa do build.
+      - run: pnpm build
       - run: pnpm migrate
       - run: pnpm test:integration
 
