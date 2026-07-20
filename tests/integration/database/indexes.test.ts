@@ -61,6 +61,26 @@ describe('garantirIndices — token_denylist', () => {
   });
 });
 
+describe('garantirIndices — password_reset_tokens (SPEC 009)', () => {
+  it('cria índice único em token_sha256', async () => {
+    const indices = await indicesDe('password_reset_tokens');
+
+    expect(indices.get('token_sha256_1')?.['unique']).toBe(true);
+  });
+
+  it('cria índice TTL em expires_at com expireAfterSeconds 0', async () => {
+    const indices = await indicesDe('password_reset_tokens');
+
+    expect(indices.get('expires_at_1')?.['expireAfterSeconds']).toBe(0);
+  });
+
+  it('cria índice de busca por user_id (invalidação em massa)', async () => {
+    const indices = await indicesDe('password_reset_tokens');
+
+    expect(indices.has('user_id_1')).toBe(true);
+  });
+});
+
 describe('garantirIndices — idempotência', () => {
   it('roda duas vezes seguidas sem lançar e sem duplicar índices', async () => {
     const antes = await indicesDe('refresh_tokens');
