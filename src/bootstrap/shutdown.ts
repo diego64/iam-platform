@@ -11,6 +11,11 @@ export interface RecursosDeEncerramento {
   readonly app: { close(): Promise<void> };
   readonly pool: { end(): Promise<void> };
   readonly mongo: { close(): Promise<void> };
+  /**
+   * Telemetria. Opcional: nem todo bootstrap a liga, e o encerramento não pode depender
+   * dela para acontecer.
+   */
+  readonly telemetria?: { encerrar(): Promise<void> };
   readonly logger: Logger;
   readonly timeoutMs: number;
   /** Injetado para o teste observar o código de saída em vez de derrubar o processo. */
@@ -26,9 +31,9 @@ export interface RecursosDeEncerramento {
 /**
  * Devolve o handler de encerramento.
  *
- * Ordem: parar de aceitar conexões (app.close drena as em voo) → devolver as conexões
- * do PostgreSQL → fechar os sockets do Mongo. Inverter isso derrubaria o banco debaixo
- * de uma requisição que ainda está sendo respondida.
+ * Ordem: parar de aceitar conexões (app.close drena as em voo) → descarregar a telemetria
+ * pendente → devolver as conexões do PostgreSQL → fechar os sockets do Mongo. Inverter
+ * isso derrubaria o banco debaixo de uma requisição que ainda está sendo respondida.
  *
  * O timer duro existe porque app.close pode nunca resolver se um handler travar: sem
  * ele o container ficaria pendurado até o SIGKILL do orquestrador, perdendo as respostas
@@ -37,7 +42,16 @@ export interface RecursosDeEncerramento {
 export function criarEncerrador(
   recursos: RecursosDeEncerramento,
 ): (sinal: string) => Promise<void> {
-  const { app, pool, mongo, logger, timeoutMs, encerrarProcesso, aoIniciarEncerramento } = recursos;
+  const {
+    app,
+    pool,
+    mongo,
+    telemetria,
+    logger,
+    timeoutMs,
+    encerrarProcesso,
+    aoIniciarEncerramento,
+  } = recursos;
   let encerrando = false;
 
   return async function encerrar(sinal: string): Promise<void> {
@@ -64,6 +78,14 @@ export function criarEncerrador(
 
     try {
       await app.close();
+
+      // Depois do app.close() e antes dos bancos. Depois, porque os spans das últimas
+      // requisições só existem quando elas terminam de ser drenadas; antes, porque
+      // fechar o pool primeiro faria a instrumentação do pg registrar erro de conexão
+      // em spans que ainda estavam sendo finalizados. O que se perde sem esta descarga
+      // é justamente a telemetria do minuto em que algo deu errado.
+      await telemetria?.encerrar();
+
       await pool.end();
       await mongo.close();
 

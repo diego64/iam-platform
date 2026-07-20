@@ -5,8 +5,32 @@
  */
 import pino, { type Logger, type LoggerOptions } from 'pino';
 import type { Writable } from 'node:stream';
+import { isSpanContextValid, trace } from '@opentelemetry/api';
 
 export type { Logger };
+
+/**
+ * Acrescenta `trace_id` e `span_id` a cada log emitido dentro de um span.
+ *
+ * É o que liga log e trace no Grafana: de uma linha de log, o `trace_id` abre o trace
+ * correspondente no Tempo. Sem isso os dois ficam em silos e a investigação vira
+ * correlação manual por horário — exatamente o trabalho que a observabilidade deveria
+ * eliminar.
+ *
+ * Fora de span, devolve objeto vazio em vez de campos nulos: log de bootstrap e de tarefa
+ * agendada não deve carregar `trace_id: null`, que polui a saída e ainda faz o Loki
+ * indexar um valor que não aponta para lugar nenhum.
+ *
+ * Sem SDK ativo, `getActiveSpan` devolve o span no-op, cujo contexto é inválido — e a
+ * checagem de validade é o que impede um `trace_id` só de zeros de vazar para o log.
+ */
+export function contextoDeTrace(): Record<string, string> {
+  const contexto = trace.getActiveSpan()?.spanContext();
+
+  return contexto !== undefined && isSpanContextValid(contexto)
+    ? { trace_id: contexto.traceId, span_id: contexto.spanId }
+    : {};
+}
 
 export interface OpcoesDeLogger {
   readonly nivel?: LoggerOptions['level'];
@@ -20,7 +44,7 @@ export interface OpcoesDeLogger {
  */
 export function criarLogger(opcoes: OpcoesDeLogger = {}): Logger {
   const { nivel = 'info', destino } = opcoes;
-  const configuracao: LoggerOptions = { level: nivel };
+  const configuracao: LoggerOptions = { level: nivel, mixin: contextoDeTrace };
 
   return destino ? pino(configuracao, destino) : pino(configuracao);
 }

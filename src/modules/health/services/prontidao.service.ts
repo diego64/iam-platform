@@ -15,10 +15,23 @@ export interface ResultadoDeProntidao {
   readonly dependencias: readonly EstadoDeDependencia[];
 }
 
+/**
+ * Porta de coleta de métricas, satisfeita estruturalmente pelos instrumentos da
+ * telemetria. Declarada aqui, e não importada de `telemetry/`, para o serviço continuar
+ * sem conhecer OpenTelemetry — o dia em que a telemetria mudar de fornecedor, este
+ * arquivo não muda.
+ */
+export interface ColetorDeProntidao {
+  registrarTransicaoDeProntidao(dependencia: string, para: string): void;
+  registrarChecagemDeProntidao(dependencia: string, duracaoSegundos: number): void;
+}
+
 export interface OpcoesDeProntidao {
   readonly verificadores: readonly Verificador[];
   readonly cacheMs: number;
   readonly logger: Logger;
+  /** Ausente com a telemetria desligada — as transições seguem sendo logadas. */
+  readonly coletor?: ColetorDeProntidao;
 }
 
 export interface ServicoDeProntidao {
@@ -28,7 +41,7 @@ export interface ServicoDeProntidao {
 }
 
 export function criarServicoDeProntidao(opcoes: OpcoesDeProntidao): ServicoDeProntidao {
-  const { verificadores, cacheMs, logger } = opcoes;
+  const { verificadores, cacheMs, logger, coletor } = opcoes;
 
   let cache: { resultado: ResultadoDeProntidao; validoAte: number } | undefined;
   // Verificação em voo. Sem isto, N consultas concorrentes chegam antes de qualquer uma
@@ -47,11 +60,17 @@ export function criarServicoDeProntidao(opcoes: OpcoesDeProntidao): ServicoDePro
    */
   function registrarTransicoes(dependencias: readonly EstadoDeDependencia[]): void {
     for (const dependencia of dependencias) {
+      // A duração entra no histograma em toda checagem, transicionando ou não: é ela que
+      // mostra a dependência degradando antes de a degradação virar queda.
+      coletor?.registrarChecagemDeProntidao(dependencia.nome, dependencia.duracao_ms / 1_000);
+
       const anterior = ultimoEstado.get(dependencia.nome);
       if (anterior === dependencia.estado) continue;
 
       ultimoEstado.set(dependencia.nome, dependencia.estado);
       if (anterior === undefined) continue; // primeira checagem não é transição
+
+      coletor?.registrarTransicaoDeProntidao(dependencia.nome, dependencia.estado);
 
       logger.warn(
         {

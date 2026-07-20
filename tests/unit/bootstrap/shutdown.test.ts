@@ -158,3 +158,55 @@ describe('criarEncerrador — falha no meio da sequência', () => {
     expect(saidas).toEqual([1]);
   });
 });
+
+/**
+ * Ordem da descarga de telemetria (SPEC 015 T15).
+ *
+ * Sem esta descarga, os spans e métricas do último minuto — justamente os do momento em
+ * que algo deu errado — morrem com o processo, e a investigação começa sem o dado do
+ * instante que interessa.
+ */
+describe('criarEncerrador — descarga da telemetria', () => {
+  it('descarrega a telemetria depois do app.close e antes dos bancos', async () => {
+    const ordem: string[] = [];
+    const { recursos } = montarCenario({
+      app: {
+        close: async () => {
+          ordem.push('app');
+          return Promise.resolve();
+        },
+      },
+      telemetria: {
+        encerrar: async () => {
+          ordem.push('telemetria');
+          return Promise.resolve();
+        },
+      },
+      pool: {
+        end: async () => {
+          ordem.push('pool');
+          return Promise.resolve();
+        },
+      },
+      mongo: {
+        close: async () => {
+          ordem.push('mongo');
+          return Promise.resolve();
+        },
+      },
+    });
+
+    await criarEncerrador(recursos)('SIGTERM');
+
+    expect(ordem).toEqual(['app', 'telemetria', 'pool', 'mongo']);
+  });
+
+  it('encerra normalmente quando não há telemetria ligada', async () => {
+    const { recursos, ordem, saidas } = montarCenario();
+
+    await criarEncerrador(recursos)('SIGTERM');
+
+    expect(ordem).toEqual(['app', 'pool', 'mongo']);
+    expect(saidas).toEqual([0]);
+  });
+});
