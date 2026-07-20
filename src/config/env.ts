@@ -7,11 +7,48 @@
  *    quem trata e derruba o processo é o server.ts (T04).
  *  - Jamais expor o valor recebido de uma variável — só o nome e o motivo.
  *
- * Escopo: apenas o contrato da SPEC 021. Chaves de JWT, scrypt, rate limit e OTel
- * entram por composição nas SPECs que as consomem (007, 009, 016, 015) — ver design.md §4.
+ * Escopo: contrato das SPECs 021 e 015. Chaves de JWT, scrypt e rate limit entram por
+ * composição nas SPECs que as consomem (007, 009, 016) — ver design.md §4.
  */
 import { z } from 'zod';
 import type { Logger } from '../shared/logger/index.js';
+
+/**
+ * Booleano vindo de variável de ambiente.
+ *
+ * `z.coerce.boolean()` não serve aqui: ele aplica `Boolean(valor)`, e `Boolean('false')`
+ * é `true` — qualquer string não vazia liga a flag. Com `METRICS_ENABLED=false` no
+ * ambiente, as métricas subiriam do mesmo jeito e ninguém notaria, porque o efeito de
+ * "desligar" é ausência de dado, não erro.
+ *
+ * Aqui a lista de valores falsos é explícita e o resto do universo é verdadeiro.
+ */
+function booleanoDeAmbiente(padrao: boolean): z.ZodEffects<z.ZodOptional<z.ZodString>, boolean> {
+  const falsos = new Set(['false', '0', 'no', 'off', '']);
+  return z
+    .string()
+    .optional()
+    .transform((valor) => (valor === undefined ? padrao : !falsos.has(valor.trim().toLowerCase())));
+}
+
+/**
+ * Contrato de telemetria (SPEC 015), isolado porque é lido duas vezes: no schema geral,
+ * junto do resto da configuração, e no módulo de telemetria — que roda antes do
+ * `carregarEnv()` e não pode depender das variáveis obrigatórias de banco já existirem.
+ */
+const formaTelemetria = {
+  METRICS_ENABLED: booleanoDeAmbiente(true),
+  /** Libera `/metrics` fora de rede interna. Default fechado: abrir é decisão explícita. */
+  METRICS_PUBLIC: booleanoDeAmbiente(false),
+  OTEL_SERVICE_NAME: z.string().min(1).default('iam-platform'),
+  /** Ausente desliga o pipeline de traces — não é erro, é a configuração de quem não coleta. */
+  OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional(),
+  OTEL_TRACES_SAMPLER_ARG: z.coerce.number().min(0).max(1).default(0.1),
+};
+
+export const esquemaTelemetria = z.object(formaTelemetria);
+
+export type ConfigDeTelemetria = Readonly<z.infer<typeof esquemaTelemetria>>;
 
 export const esquemaEnv = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -36,7 +73,23 @@ export const esquemaEnv = z.object({
   // disso a checagem demora mais que o timeout típico da sonda, e o orquestrador mata a
   // requisição concluindo "fora" sem saber por quê — pior que um 503 dizendo qual caiu.
   HEALTH_TIMEOUT_MS: z.coerce.number().int().min(100).max(5_000).default(1_000),
+
+  ...formaTelemetria,
 });
+
+/**
+ * Configuração de telemetria isolada, para uso no bootstrap do SDK.
+ *
+ * **Nunca lança.** Roda na primeira linha do processo, antes de existir logger ou
+ * tratamento de erro; uma variável de telemetria malformada não pode impedir o serviço
+ * de subir. Valor inválido cai no default — telemetria é diagnóstico, não função.
+ */
+export function carregarConfigDeTelemetria(
+  fonte: NodeJS.ProcessEnv = process.env,
+): ConfigDeTelemetria {
+  const resultado = esquemaTelemetria.safeParse(fonte);
+  return Object.freeze(resultado.success ? resultado.data : esquemaTelemetria.parse({}));
+}
 // Sem .strict(): process.env é sempre um superset legítimo (PATH, HOME, ...).
 // Chave desconhecida não invalida a configuração; ela apenas é descartada.
 
