@@ -32,7 +32,7 @@ function booleanoDeAmbiente(padrao: boolean): z.ZodEffects<z.ZodOptional<z.ZodSt
 }
 
 /**
- * Contrato de telemetria (SPEC 015), isolado porque é lido duas vezes: no schema geral,
+ * Contrato de telemetria, isolado porque é lido duas vezes: no schema geral,
  * junto do resto da configuração, e no módulo de telemetria — que roda antes do
  * `carregarEnv()` e não pode depender das variáveis obrigatórias de banco já existirem.
  */
@@ -44,9 +44,22 @@ const formaTelemetria = {
   /** Ausente desliga o pipeline de traces — não é erro, é a configuração de quem não coleta. */
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional(),
   OTEL_TRACES_SAMPLER_ARG: z.coerce.number().min(0).max(1).default(0.1),
+  /**
+   * Commit da imagem em execução, rótulo de `iam_build_info`. Injetado pelo CD como
+   * build arg; fora dele não existe commit confiável, e mentir um valor seria pior que
+   * assumir "desconhecido" durante uma investigação.
+   */
+  GIT_COMMIT: z.string().min(1).default('desconhecido'),
 };
 
-export const esquemaTelemetria = z.object(formaTelemetria);
+/**
+ * `NODE_ENV` entra aqui de novo — não por duplicação, mas porque o SDK precisa dele para
+ * o atributo `deployment.environment` e roda antes de o schema geral ser validado.
+ */
+export const esquemaTelemetria = z.object({
+  ...formaTelemetria,
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+});
 
 export type ConfigDeTelemetria = Readonly<z.infer<typeof esquemaTelemetria>>;
 
