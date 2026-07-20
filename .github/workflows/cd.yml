@@ -6,9 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  packages: write
-  id-token: write # Cosign keyless
+  contents: read
 
 concurrency:
   group: cd-producao
@@ -21,6 +19,8 @@ jobs:
   build-docker:
     name: Build Docker
     runs-on: ubuntu-latest
+    permissions:
+      packages: write
     outputs:
       digest: ${{ steps.push.outputs.digest }}
       version: ${{ steps.meta.outputs.version }}
@@ -54,6 +54,9 @@ jobs:
   cosign-sign:
     name: Cosign Sign
     runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      id-token: write # assinatura keyless via OIDC
     needs: [build-docker]
     steps:
       - uses: sigstore/cosign-installer@v3
@@ -137,6 +140,8 @@ jobs:
   create-release:
     name: Criar Release
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     needs: [health-check, build-docker]
     steps:
       - uses: actions/checkout@v6

@@ -6,12 +6,14 @@ on:
   workflow_dispatch:
 
 permissions:
-  security-events: write
-  packages: read
+  contents: read
 
 jobs:
   scan-latest:
     runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      packages: read
     steps:
       - name: Trivy na última imagem publicada
         uses: aquasecurity/trivy-action@master
