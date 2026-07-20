@@ -9,6 +9,10 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'lcov', 'html'],
       include: ['src/**/*.ts'],
+      // server.ts é exercitado por tests/integration/server/bootstrap.test.ts (6 casos,
+      // incluindo os caminhos de saída 1), mas via `spawn` de dist/server.js — o provider
+      // v8 não instrumenta processo filho, então apareceria como 0% e derrubaria o gate.
+      // Exclusão é artefato de medição, não ausência de teste.
       exclude: ['src/server.ts', 'src/**/index.ts', 'src/**/types/**'],
       thresholds: { lines: 85, functions: 85, branches: 80, statements: 85 },
     },
