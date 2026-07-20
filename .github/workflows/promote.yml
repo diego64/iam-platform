@@ -91,6 +91,7 @@ jobs:
         run: bash scripts/render-deploy.sh "${{ env.IMAGEM }}"
 
       - name: Smoke contra a URL pública
+        id: smoke
         env:
           BASE_URL: ${{ secrets.BASE_URL }}
         run: bash scripts/healthcheck.sh "$BASE_URL"
@@ -110,10 +111,22 @@ jobs:
             echo "| resultado | ${{ job.status }} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
+  reverter:
+    name: Rollback automático
+    needs: [promover]
+    # Só quando a promoção falhou E existe alvo conhecido. Sem homologação, o smoke em
+    # produção é a primeira execução real do artefato — se ele reprova, o tráfego já
+    # está sendo servido por uma versão que não passou na verificação.
+    if: failure() && needs.promover.outputs.digest_anterior != ''
+    uses: ./.github/workflows/rollback.yml
+    with:
+      digest_alvo: ${{ needs.promover.outputs.digest_anterior }}
+    secrets: inherit
+
   notificar:
     name: Notificar
     runs-on: ubuntu-latest
-    needs: [validar, promover]
+    needs: [validar, promover, reverter]
     # Depende de TODOS os jobs e roda sempre: com needs parcial, este job seria
     # *skipped* justamente quando algo falhasse, que é quando o aviso importa.
     if: always()
@@ -121,7 +134,8 @@ jobs:
       - name: Resultado da promoção
         run: |
           if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
-            echo "::error::Promoção falhou. Digest anterior: ${{ needs.promover.outputs.digest_anterior }}"
+            echo "::error::Promoção falhou. Anterior: ${{ needs.promover.outputs.digest_anterior }}"
+            echo "::notice::Rollback automático: ${{ needs.reverter.result }}"
             exit 1
           fi
           echo "Promoção concluída: ${{ env.IMAGEM }}"

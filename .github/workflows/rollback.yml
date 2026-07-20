@@ -1,36 +1,68 @@
-name: Rollback (Manual)
+name: Rollback
 
+# Reverte produção para um digest anterior. Disparado à mão durante incidente, ou
+# automaticamente pelo promote.yml quando o smoke pós-deploy reprova.
 on:
   workflow_dispatch:
     inputs:
-      release_tag:
-        description: 'Tag da release para restaurar (ex: v0.3.1)'
+      digest_alvo:
+        description: 'Imagem para a qual reverter (repo@sha256:...)'
         required: true
-      restore_database:
-        description: 'Restaurar backup do banco?'
-        type: boolean
-        default: false
+        type: string
+  workflow_call:
+    inputs:
+      digest_alvo:
+        required: true
+        type: string
 
 permissions:
   contents: read
-  packages: read
+
+# Serializa com a promoção: reverter enquanto um deploy avança deixaria o serviço em
+# estado indefinido, e é justamente durante incidente que os dois se cruzam.
+concurrency:
+  group: promocao-producao
+  cancel-in-progress: false
 
 jobs:
-  rollback:
+  reverter:
+    name: Reverter
     runs-on: ubuntu-latest
-    environment: production
+    # `producao`, sem acento e sem maiúscula. O workflow anterior dizia `production`,
+    # que não existe — e o GitHub CRIA o environment ausente na hora, sem nenhuma regra
+    # de proteção. O rollback passaria sem aprovação, silenciosamente.
+    environment: producao
+    permissions:
+      contents: read
+      packages: read
     steps:
       - uses: actions/checkout@v6
-        with: { ref: '${{ inputs.release_tag }}' }
-      - name: Restaurar Banco
-        if: inputs.restore_database
+      - uses: sigstore/cosign-installer@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Reverter para o digest alvo
         env:
-          POSTGRES_URL: ${{ secrets.PROD_POSTGRES_URL }}
-          MONGODB_URL: ${{ secrets.PROD_MONGODB_URL }}
-        run: bash scripts/rollback.sh --database "${{ inputs.release_tag }}"
-      - name: Restaurar Docker Image (redeploy da tag)
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+          BASE_URL: ${{ secrets.BASE_URL }}
+        run: bash scripts/rollback.sh "${{ inputs.digest_alvo }}"
+
+      - name: Resumo
+        if: always()
         run: |
-          curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}&ref=${{ inputs.release_tag }}"
-      - name: Smoke Test
-        env: { BASE_URL: '${{ secrets.PROD_BASE_URL }}' }
-        run: bash scripts/healthcheck.sh "$BASE_URL" --smoke
+          {
+            echo "## Rollback"
+            echo
+            echo "| Campo | Valor |"
+            echo "|---|---|"
+            echo "| alvo | \`${{ inputs.digest_alvo }}\` |"
+            echo "| disparo | ${{ github.event_name }} |"
+            echo "| resultado | ${{ job.status }} |"
+            echo
+            echo "Banco NÃO foi restaurado: reverter imagem é reversível, restaurar"
+            echo "banco é destrutivo e exige decisão humana sobre janela de perda."
+          } >> "$GITHUB_STEP_SUMMARY"
