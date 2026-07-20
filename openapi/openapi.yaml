@@ -16,6 +16,37 @@ servers:
     description: Desenvolvimento local
 components:
   schemas:
+    Dependencia:
+      type: object
+      additionalProperties: false
+      required: [nome, estado, duracao_ms]
+      properties:
+        nome:
+          type: string
+          enum: [postgres, mongodb]
+        estado:
+          type: string
+          enum: [up, down]
+        duracao_ms:
+          type: integer
+          minimum: 0
+        motivo:
+          type: string
+          description: >
+            Categoria fixa, nunca a mensagem do driver — ela traz host, porta e usuário,
+            e esta resposta é pública e sem autenticação.
+          enum: [timeout, indisponivel, erro_interno]
+    Prontidao:
+      type: object
+      additionalProperties: false
+      required: [status, dependencias]
+      properties:
+        status:
+          type: string
+          enum: [ready]
+        dependencias:
+          type: array
+          items: { $ref: '#/components/schemas/Dependencia' }
     Problem:
       type: object
       description: Erro no formato RFC 7807.
@@ -71,3 +102,37 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+  /health/ready:
+    get:
+      tags: [health]
+      summary: Readiness probe
+      description: >
+        Indica se o serviço consegue ATENDER: verifica PostgreSQL e MongoDB.
+        Diferente de /health/live, que indica apenas que o processo está vivo — um
+        liveness que checasse dependência viraria restart loop e derrubaria também as
+        réplicas que ainda serviam.
+      operationId: healthReady
+      security: []
+      responses:
+        '200':
+          description: Pronto para receber tráfego
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Prontidao'
+              example:
+                status: ready
+                dependencias:
+                  - { nome: postgres, estado: up, duracao_ms: 3 }
+                  - { nome: mongodb, estado: up, duracao_ms: 5 }
+        '503':
+          description: Dependência indisponível ou instância encerrando
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              example:
+                type: https://iam.example.com/problems/service-unavailable
+                title: Serviço indisponível
+                status: 503
+                detail: 'Dependências indisponíveis: postgres'

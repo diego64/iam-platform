@@ -5,21 +5,23 @@
 # Sai 0 apenas com HTTP 200 e corpo contendo "status":"ok".
 # Reutilizado pelo smoke test do pipeline (SPEC 023).
 #
-# Escopo SPEC 021: só /health/live. As checagens de /health/ready, JWKS e login
-# entram junto com as SPECs que criam esses endpoints (017, 007, 001).
+# Valida READINESS, não liveness. A diferença decide se o smoke pós-deploy presta:
+# /health/live responde 200 com os bancos fora, então um deploy incapaz de falar com o
+# banco passaria no smoke e receberia tráfego. É o cenário que a ausência de ambiente de
+# homologação torna possível chegar a produção sem ninguém ver.
 set -euo pipefail
 
 BASE="${1:?informe a URL base, ex: https://iam.example.com}"
 TENTATIVAS="${2:-10}"
 INTERVALO="${3:-1}"
 
-ALVO="${BASE%/}/health/live"
+ALVO="${BASE%/}/health/ready"
 
 for tentativa in $(seq 1 "${TENTATIVAS}"); do
   # -f sozinho não basta: um proxy pode devolver 200 com corpo de erro, então o
   # corpo é validado explicitamente.
   if CORPO=$(curl -fsS --max-time 5 "${ALVO}" 2>/dev/null); then
-    if [[ "${CORPO}" == *'"status":"ok"'* ]]; then
+    if [[ "${CORPO}" == *'"status":"ready"'* ]]; then
       echo "OK  ${ALVO} respondeu 200 na tentativa ${tentativa}/${TENTATIVAS}"
       exit 0
     fi

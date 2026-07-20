@@ -12,6 +12,11 @@ import { conectarMongo } from './database/mongodb/connection.js';
 import { garantirIndices } from './database/mongodb/indexes.js';
 import { criarEncerrador } from './bootstrap/shutdown.js';
 import { construirApp } from './app.js';
+import { criarServicoDeProntidao } from './modules/health/services/prontidao.service.js';
+import {
+  criarVerificadorMongo,
+  criarVerificadorPostgres,
+} from './modules/health/services/verificadores.js';
 
 async function iniciar(): Promise<void> {
   // Logger de boot: antes da validação não existe LOG_LEVEL confiável.
@@ -54,7 +59,17 @@ async function iniciar(): Promise<void> {
   await garantirIndices(banco);
   logger.info('boot.indices_ok');
 
-  const app = await construirApp(env);
+  // O controller de health não conhece pg nem mongodb: recebe verificadores prontos.
+  const prontidao = criarServicoDeProntidao({
+    verificadores: [
+      criarVerificadorPostgres(pool, env.HEALTH_TIMEOUT_MS),
+      criarVerificadorMongo(banco, env.HEALTH_TIMEOUT_MS),
+    ],
+    cacheMs: env.HEALTH_CACHE_MS,
+    logger,
+  });
+
+  const app = await construirApp(env, { prontidao });
 
   // Handlers ANTES do listen. Registrá-los depois deixa uma janela em que o processo
   // já aceita conexões mas ainda usa o comportamento default de SIGTERM: morte
@@ -66,6 +81,11 @@ async function iniciar(): Promise<void> {
     mongo,
     logger,
     timeoutMs: env.SHUTDOWN_TIMEOUT_MS,
+    // Marca a indisponibilidade ANTES de app.close(), para o balanceador tirar esta
+    // instância da rotação enquanto ela ainda drena as requisições em voo.
+    aoIniciarEncerramento: () => {
+      prontidao.marcarEncerrando();
+    },
     encerrarProcesso: (codigo) => {
       process.exit(codigo);
     },

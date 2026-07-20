@@ -55,10 +55,13 @@ async function servidorFalso(
 }
 
 describe('healthcheck.sh', () => {
-  it('sai 0 quando o ambiente responde 200 com status ok', async () => {
+  it('sai 0 quando o readiness responde 200 com status ready', async () => {
     const { base, fechar } = await servidorFalso(() => ({
       status: 200,
-      corpo: JSON.stringify({ status: 'ok', uptime_seconds: 5 }),
+      corpo: JSON.stringify({
+        status: 'ready',
+        dependencias: [{ nome: 'postgres', estado: 'up', duracao_ms: 2 }],
+      }),
     }));
 
     try {
@@ -101,6 +104,59 @@ describe('healthcheck.sh', () => {
     try {
       const resultado = await rodarSmoke(base, 2, 1);
       expect(resultado.codigo).not.toBe(0);
+    } finally {
+      await fechar();
+    }
+  }, 30_000);
+
+  it('REPROVA ambiente onde só o liveness responde', async () => {
+    // O cenário que a ausência de homologação torna possível chegar a produção: o
+    // processo sobe, /health/live responde 200, e o serviço não consegue falar com o
+    // banco. Enquanto o smoke apontava para liveness, isso passava.
+    const { base, fechar } = await servidorFalso((url) =>
+      url.includes('/health/live')
+        ? { status: 200, corpo: JSON.stringify({ status: 'ok', uptime_seconds: 5 }) }
+        : { status: 503, corpo: JSON.stringify({ title: 'Serviço indisponível' }) },
+    );
+
+    try {
+      const resultado = await rodarSmoke(base, 2, 1);
+      expect(resultado.codigo).not.toBe(0);
+    } finally {
+      await fechar();
+    }
+  }, 30_000);
+
+  it('REPROVA readiness que responde 200 mas sem status ready', async () => {
+    // 200 com corpo inesperado é o caso que `curl -f` sozinho deixaria passar.
+    const { base, fechar } = await servidorFalso(() => ({
+      status: 200,
+      corpo: JSON.stringify({ status: 'ok' }),
+    }));
+
+    try {
+      const resultado = await rodarSmoke(base, 2, 1);
+      expect(resultado.codigo).not.toBe(0);
+      expect(resultado.saida).toContain('corpo inesperado');
+    } finally {
+      await fechar();
+    }
+  }, 30_000);
+
+  it('consulta /health/ready, não /health/live', async () => {
+    const consultadas: string[] = [];
+    const { base, fechar } = await servidorFalso((url) => {
+      consultadas.push(url);
+      return {
+        status: 200,
+        corpo: JSON.stringify({ status: 'ready', dependencias: [] }),
+      };
+    });
+
+    try {
+      await rodarSmoke(base);
+      expect(consultadas.some((u) => u.includes('/health/ready'))).toBe(true);
+      expect(consultadas.some((u) => u.includes('/health/live'))).toBe(false);
     } finally {
       await fechar();
     }

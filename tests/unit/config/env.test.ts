@@ -46,6 +46,42 @@ describe('carregarEnv — defaults', () => {
   });
 });
 
+describe('carregarEnv — configuração de prontidão', () => {
+  it('aplica os defaults de cache e timeout', () => {
+    const env = carregarEnv(fonteValida());
+
+    expect(env.HEALTH_CACHE_MS).toBe(2_000);
+    expect(env.HEALTH_TIMEOUT_MS).toBe(1_000);
+  });
+
+  it('aceita cache zerado, que desliga o cache', () => {
+    const env = carregarEnv(fonteValida({ HEALTH_CACHE_MS: '0' }));
+
+    expect(env.HEALTH_CACHE_MS).toBe(0);
+  });
+
+  it.each(['-1', '30001', 'abc'])('rejeita HEALTH_CACHE_MS=%s', (valor) => {
+    const erro = capturarErro(fonteValida({ HEALTH_CACHE_MS: valor }));
+
+    expect(erro.variaveis.map((v) => v.nome)).toContain('HEALTH_CACHE_MS');
+  });
+
+  it.each(['99', '5001', 'abc'])('rejeita HEALTH_TIMEOUT_MS=%s', (valor) => {
+    // O máximo de 5s protege contra um timeout maior que o da sonda: ali o
+    // orquestrador mata a requisição e conclui "fora" sem diagnóstico algum.
+    const erro = capturarErro(fonteValida({ HEALTH_TIMEOUT_MS: valor }));
+
+    expect(erro.variaveis.map((v) => v.nome)).toContain('HEALTH_TIMEOUT_MS');
+  });
+
+  it('coage os valores vindos como string do ambiente', () => {
+    const env = carregarEnv(fonteValida({ HEALTH_CACHE_MS: '500', HEALTH_TIMEOUT_MS: '250' }));
+
+    expect(env.HEALTH_CACHE_MS).toBe(500);
+    expect(env.HEALTH_TIMEOUT_MS).toBe(250);
+  });
+});
+
 describe('carregarEnv — coerção de PORT', () => {
   it('converte a string do ambiente em inteiro', () => {
     const env = carregarEnv(fonteValida({ PORT: '8080' }));

@@ -26,6 +26,16 @@ export const esquemaEnv = z.object({
   MONGODB_DB: z.string().min(1).default('iam_sessions'),
 
   SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(60_000).default(10_000),
+
+  // Janela do cache de prontidão. A sonda bate a cada poucos segundos e, sem cache,
+  // cada batida vira uma consulta em cada banco — multiplicado pelo número de réplicas.
+  // 0 desliga, útil em teste.
+  HEALTH_CACHE_MS: z.coerce.number().int().min(0).max(30_000).default(2_000),
+
+  // Teto por dependência na checagem de prontidão. O máximo é 5s de propósito: acima
+  // disso a checagem demora mais que o timeout típico da sonda, e o orquestrador mata a
+  // requisição concluindo "fora" sem saber por quê — pior que um 503 dizendo qual caiu.
+  HEALTH_TIMEOUT_MS: z.coerce.number().int().min(100).max(5_000).default(1_000),
 });
 // Sem .strict(): process.env é sempre um superset legítimo (PATH, HOME, ...).
 // Chave desconhecida não invalida a configuração; ela apenas é descartada.
