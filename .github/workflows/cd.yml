@@ -61,6 +61,10 @@ jobs:
           context: .
           file: infra/docker/Dockerfile
           push: true
+          # Alimenta iam_build_info: a métrica que correlaciona incidente com a versão
+          # exata em execução.
+          build-args: |
+            GIT_COMMIT=${{ github.sha }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha

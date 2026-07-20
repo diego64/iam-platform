@@ -3,7 +3,7 @@
  *
  * Duas perguntas, e a primeira é a que decide se a observabilidade continua ligada:
  *
- * 1. Quanto a instrumentação acrescenta ao p95 de uma requisição normal (RNF-01: menos
+ * 1. Quanto a instrumentação acrescenta ao p95 de uma requisição normal (menos
  *    de 3 ms). Telemetria cara demais acaba desligada em produção "temporariamente" — e
  *    aí não existe observabilidade justamente quando ela é necessária.
  *
@@ -72,7 +72,7 @@ export const options = {
     },
   },
   thresholds: {
-    // RNF-01: o acréscimo da instrumentação, medido par a par.
+    // O acréscimo da instrumentação, medido par a par.
     telemetria_acrescimo_ms: ['p(95)<3'],
     // Garante que o teste exercitou de verdade, em vez de passar por vacuidade. Um
     // contador à parte porque Trend do k6 não aceita agregação `count`.
@@ -113,8 +113,8 @@ export function handleSummary(dados) {
     '=== Sobrecarga da instrumentação ===',
     `p95 sem telemetria : ${p95('telemetria_latencia_linha_de_base').toFixed(2)} ms`,
     `p95 com telemetria : ${p95('telemetria_latencia_instrumentada').toFixed(2)} ms`,
-    `p95 do acréscimo   : ${p95('telemetria_acrescimo_ms').toFixed(2)} ms   (RNF-01: < 3 ms)`,
-    `p95 GET /metrics   : ${p95('telemetria_latencia_metrics').toFixed(2)} ms  (RNF-02: < 50 ms)`,
+    `p95 do acréscimo   : ${p95('telemetria_acrescimo_ms').toFixed(2)} ms   (menos de 3 ms)`,
+    `p95 GET /metrics   : ${p95('telemetria_latencia_metrics').toFixed(2)} ms  (menos de 50 ms)`,
     '',
     'O veredito é dos thresholds acima — o código de saída do k6 vem deles, não daqui.',
     '',
