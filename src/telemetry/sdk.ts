@@ -196,7 +196,13 @@ export function iniciarTelemetria(
       sampler: new tracing.ParentBasedSampler({
         root: new tracing.TraceIdRatioBasedSampler(config.OTEL_TRACES_SAMPLER_ARG),
       }),
-      ...(exportadorPrometheus === undefined ? {} : { metricReader: exportadorPrometheus }),
+      // SEMPRE explícito, inclusive vazio — pelo mesmo motivo de `spanProcessors` abaixo.
+      // Com métricas desligadas mas um endpoint OTLP presente (para traces), omitir esta
+      // lista faria o NodeSDK cair no default do ambiente e montar um exportador OTLP de
+      // métricas: `METRICS_ENABLED=false` desligaria o `/metrics` mas seguiria empurrando
+      // as métricas para o Collector — o vazamento silencioso que esta SPEC existe para
+      // evitar. `metricReaders`, e não o `metricReader` singular, que está deprecated.
+      metricReaders: exportadorPrometheus === undefined ? [] : [exportadorPrometheus],
       // O log desta aplicação é Pino em stdout, coletado pelo Loki — não passa pelo
       // OpenTelemetry. Omitir esta lista faria o NodeSDK montar um LoggerProvider a
       // partir do ambiente, com exportador OTLP para localhost:4318: um pipeline que
