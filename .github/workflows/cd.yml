@@ -22,7 +22,10 @@ jobs:
     permissions:
       packages: write
     outputs:
+      # Identidade imutável do artefato: TODO job seguinte referencia por aqui.
       digest: ${{ steps.push.outputs.digest }}
+      # Referência completa, pronta para uso — evita recompor a string em cada job.
+      imagem: ${{ env.IMAGE }}@${{ steps.push.outputs.digest }}
       version: ${{ steps.meta.outputs.version }}
     steps:
       - uses: actions/checkout@v6
@@ -36,9 +39,18 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.IMAGE }}
+          # `latest` NÃO é publicado. Tag mutável torna o rollback não determinístico:
+          # o que estava rodando deixa de ser recuperável, porque o ponteiro já andou.
+          # A promoção referencia digest; a tag sha- serve só para leitura humana.
           tags: |
-            type=sha,prefix=
-            type=raw,value=latest
+            type=sha,prefix=sha-
+      - name: Confirmar que nenhuma tag mutável foi gerada
+        run: |
+          if echo '${{ steps.meta.outputs.tags }}' | grep -qE '(:latest|:main|:stable)$'; then
+            echo "Tag mutável gerada: ${{ steps.meta.outputs.tags }}" >&2
+            exit 1
+          fi
+          echo "Tags: ${{ steps.meta.outputs.tags }}"
       - id: push
         name: Push GHCR
         uses: docker/build-push-action@v6
