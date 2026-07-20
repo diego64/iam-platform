@@ -181,7 +181,10 @@ export async function construirApp(
   const exportador = dependencias.telemetria?.exportadorPrometheus;
   if (exportador !== undefined) {
     registrarMetricasDeRequisicao(app, env.GIT_COMMIT);
-    registrarRotaDeMetrics(app, { exportador });
+    registrarRotaDeMetrics(app, {
+      exportador,
+      restringirAoInterno: env.NODE_ENV === 'production' && !env.METRICS_PUBLIC,
+    });
   }
 
   registrarRotasDeHealth(app, {

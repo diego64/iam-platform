@@ -36,6 +36,25 @@ services:
       - key: SHUTDOWN_TIMEOUT_MS
         value: '10000'
 
+      # Observabilidade. METRICS_PUBLIC fica false: /metrics expõe topologia, nomes de
+      # rota e volume de tráfego, e no Render o serviço só tem endereço público — abrir
+      # exige decisão explícita, registrada aqui, não um default que ninguém escolheu.
+      - key: METRICS_ENABLED
+        value: 'true'
+      - key: METRICS_PUBLIC
+        value: 'false'
+      - key: OTEL_SERVICE_NAME
+        value: iam-platform
+      # 10% em produção: amostrar tudo custa caro sem responder pergunta que a amostra
+      # já responde.
+      - key: OTEL_TRACES_SAMPLER_ARG
+        value: '0.1'
+      # Endpoint do Collector e commit da imagem entram pelo pipeline/painel.
+      - key: OTEL_EXPORTER_OTLP_ENDPOINT
+        sync: false
+      - key: GIT_COMMIT
+        sync: false
+
       # sync: false ⇒ o valor é definido no painel/secret manager e nunca entra
       # neste arquivo, que é versionado.
       - key: POSTGRES_URL
