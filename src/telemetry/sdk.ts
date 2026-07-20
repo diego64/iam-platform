@@ -197,8 +197,19 @@ export function iniciarTelemetria(
         root: new tracing.TraceIdRatioBasedSampler(config.OTEL_TRACES_SAMPLER_ARG),
       }),
       ...(exportadorPrometheus === undefined ? {} : { metricReader: exportadorPrometheus }),
+      // O log desta aplicação é Pino em stdout, coletado pelo Loki — não passa pelo
+      // OpenTelemetry. Omitir esta lista faria o NodeSDK montar um LoggerProvider a
+      // partir do ambiente, com exportador OTLP para localhost:4318: um pipeline que
+      // ninguém consome e que, sem coletor ali, segurava o `sdk.shutdown()` por ~7 s.
+      logRecordProcessors: [],
+      // SEMPRE explícito, inclusive vazio. Omitir `spanProcessors` faz o NodeSDK cair no
+      // default derivado do ambiente: um exportador OTLP apontando para
+      // localhost:4318. Sem coletor ali, todo span vai para um buffer que só falha no
+      // flush — e o `sdk.shutdown()` fica ~8 s esperando esse flush, o que estourou o
+      // SHUTDOWN_TIMEOUT_MS e fez o container sair com código 1. Lista vazia é o que
+      // faz o NodeSDK não montar TracerProvider nenhum.
       ...(config.OTEL_EXPORTER_OTLP_ENDPOINT === undefined
-        ? {}
+        ? { spanProcessors: [] }
         : {
             // Em lote, fora do caminho da requisição: Collector fora derruba o buffer,
             // não a resposta ao cliente.

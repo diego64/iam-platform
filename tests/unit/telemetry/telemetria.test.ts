@@ -7,6 +7,7 @@
  * teste não deve herdar o singleton do processo.
  */
 import { afterEach, describe, expect, it } from 'vitest';
+import { trace } from '@opentelemetry/api';
 import {
   iniciarTelemetria,
   versaoDaAplicacao,
@@ -67,6 +68,29 @@ describe('iniciarTelemetria — o que sobe conforme a configuração', () => {
     expect(telemetria.traces).toBe(false);
     expect(telemetria.exportadorPrometheus).toBeUndefined();
   });
+});
+
+describe('sem endpoint OTLP, o pipeline de traces não sobe de verdade', () => {
+  it('não deixa o NodeSDK montar o exportador padrão para localhost:4318', () => {
+    // Regressão: omitir `spanProcessors` fazia o NodeSDK cair no default derivado do
+    // ambiente — um exportador OTLP para localhost:4318. O handle dizia traces:false
+    // enquanto o SDK exportava mesmo assim, e o flush do encerramento passava ~8 s
+    // esperando um coletor que não existe. Sem TracerProvider, o tracer global segue
+    // sendo o no-op, e span no-op não grava.
+    const telemetria = subir();
+    const span = trace.getTracer('teste').startSpan('operacao');
+    const gravando = span.isRecording();
+    span.end();
+
+    expect(telemetria.traces).toBe(false);
+    expect(gravando).toBe(false);
+  });
+
+  // O caso positivo — com endpoint, o span grava e é exportado — vive em
+  // tests/integration/telemetry/traces.test.ts, contra um coletor OTLP de verdade.
+  // Aqui ele não caberia: o OTel registra o TracerProvider num singleton global e
+  // ignora registros seguintes, então o segundo SDK deste arquivo nunca viraria o
+  // provider global e o teste falharia por artefato de ordem, não por comportamento.
 });
 
 describe('iniciarTelemetria — nenhum caminho lança', () => {
