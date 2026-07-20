@@ -38,7 +38,7 @@ describe('nenhuma tag mutável é publicada', () => {
 
   it('nenhum workflow publica :latest', () => {
     const comLatest = arquivos().filter((arquivo) =>
-      linhasEfetivas(arquivo).some((l) => /value=latest|:latest['"]?\s*$/.test(l)),
+      linhasEfetivas(arquivo).some((l) => /(?:value=latest)|(?::latest['"]?\s*$)/.test(l)),
     );
 
     // docker-scan.yml referencia :latest para LER a imagem publicada, não para publicar.

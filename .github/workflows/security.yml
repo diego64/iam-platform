@@ -25,6 +25,12 @@ jobs:
       - name: TruffleHog
         uses: trufflesecurity/trufflehog@main
         with:
+          # Intervalo explícito. Dentro de um workflow reutilizável o action não resolve
+          # sozinho o BASE/HEAD do pull request e cai para varrer o histórico inteiro —
+          # aí o check reprova por commits antigos da main, que o PR não tem como
+          # consertar, e nunca fica verde. Um check de PR avalia o que o PR muda.
+          base: ${{ github.event.pull_request.base.sha || github.event.before }}
+          head: ${{ github.event.pull_request.head.sha || github.sha }}
           # Aspas obrigatórias: em fluxo YAML a vírgula encerra o valor, e
           # `{ extra_args: --results=verified, unknown }` virava
           # `extra_args: --results=verified` mais uma chave inválida `unknown`,
