@@ -58,6 +58,10 @@ function instrumentacoes(): ReturnType<typeof getNodeAutoInstrumentations> {
     '@opentelemetry/instrumentation-http': {
       ignoreIncomingRequestHook: (requisicao) => ignorarSondas(requisicao.url ?? ''),
     },
+    // Publica séries `nodejs_*` e `v8js_*` com rótulos fora da lista fechada da SPEC, e
+    // o que elas medem (event loop, heap) é perfilamento — explicitamente fora de escopo.
+    // O teste de contrato de rótulos reprova se voltarem.
+    '@opentelemetry/instrumentation-runtime-node': { enabled: false },
     '@opentelemetry/instrumentation-fs': { enabled: false },
     '@opentelemetry/instrumentation-dns': { enabled: false },
     '@opentelemetry/instrumentation-net': { enabled: false },
