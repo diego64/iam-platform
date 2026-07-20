@@ -12,10 +12,11 @@ services:
     plan: starter
     region: oregon
 
-    # A aplicação fica como Liveness enquanto não for entregue /health/ready. Trocar para
-    # /health/ready assim que existir: liveness não checa PostgreSQL nem MongoDB,
-    # então hoje o Render promove um deploy que ainda não fala com os bancos.
-    healthCheckPath: /health/live
+    # Readiness, não liveness. Liveness responde 200 com PostgreSQL e MongoDB fora —
+    # apontado para ele, o Render promovia um deploy incapaz de atender. Sem ambiente de
+    # homologação, esta sonda é o primeiro e único ponto em que isso é detectado antes
+    # de servir tráfego.
+    healthCheckPath: /health/ready
 
     # Roda uma vez, antes de trocar o tráfego. No entrypoint do container, N
     # réplicas subindo em paralelo executariam a migração N vezes.
