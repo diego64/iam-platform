@@ -11,6 +11,8 @@ info:
 tags:
   - name: health
     description: Sondas de disponibilidade consumidas por Docker e Render.
+  - name: password
+    description: Troca, recuperação e política de senha.
 servers:
   - url: http://localhost:3000
     description: Desenvolvimento local
@@ -136,3 +138,131 @@ paths:
                 title: Serviço indisponível
                 status: 503
                 detail: 'Dependências indisponíveis: postgres'
+  /auth/password/change:
+    post:
+      tags: [password]
+      summary: Troca a senha do usuário autenticado
+      description: >
+        Exige a senha atual. Em sucesso, revoga todas as sessões do usuário e
+        invalida tokens de reset pendentes.
+      operationId: passwordChange
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [senha_atual, senha_nova]
+              properties:
+                senha_atual: { type: string, minLength: 1, maxLength: 128 }
+                senha_nova: { type: string, minLength: 12, maxLength: 128 }
+      responses:
+        '204':
+          description: Senha trocada
+        '400':
+          description: Payload inválido, política reprovada ou senha reutilizada
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '401':
+          description: Não autenticado ou senha atual incorreta
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '429':
+          description: Limite de tentativas excedido
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /auth/password/forgot:
+    post:
+      tags: [password]
+      summary: Solicita a recuperação de senha
+      description: >
+        Responde 202 sempre, exista o e-mail ou não, para não revelar quais contas
+        existem. Para e-mail existente e ativo, envia um token de reset.
+      operationId: passwordForgot
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [email]
+              properties:
+                email: { type: string, format: email, maxLength: 254 }
+      responses:
+        '202':
+          description: Requisição aceita (resposta idêntica para e-mail existente ou não)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+        '429':
+          description: Limite de tentativas excedido
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /auth/password/reset:
+    post:
+      tags: [password]
+      summary: Redefine a senha a partir de um token de reset
+      description: >
+        Consome o token de reset (uso único). Em sucesso, revoga todas as sessões do
+        usuário. Token inválido, expirado ou já usado retornam o mesmo erro genérico.
+      operationId: passwordReset
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [token, senha_nova]
+              properties:
+                token: { type: string, minLength: 43, maxLength: 43 }
+                senha_nova: { type: string, minLength: 12, maxLength: 128 }
+      responses:
+        '204':
+          description: Senha redefinida
+        '400':
+          description: Token inválido/expirado/usado, política reprovada ou senha reutilizada
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '429':
+          description: Limite de tentativas excedido
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /auth/password/policy:
+    get:
+      tags: [password]
+      summary: Regras vigentes de força de senha
+      description: >
+        Expõe os parâmetros da política (comprimento e classes exigidas) para o cliente
+        montar validação e mensagens; a fonte da verdade continua no servidor.
+      operationId: passwordPolicy
+      security: []
+      responses:
+        '200':
+          description: Parâmetros da política
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  min_length: { type: integer }
+                  max_length: { type: integer }
+                  required_classes: { type: integer }
+                  classes:
+                    type: array
+                    items: { type: string }
+                  blocks_common_passwords: { type: boolean }
