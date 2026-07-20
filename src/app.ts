@@ -21,12 +21,28 @@ import { registrarRotasDeHealth } from './modules/health/index.js';
 
 const TIPO_PROBLEM_JSON = 'application/problem+json';
 
+/**
+ * Quantos hops de proxy confiar ao derivar `request.ip` do `X-Forwarded-For`.
+ *
+ * `true` confiaria na cadeia inteira, e a ponta esquerda do XFF é escrita pelo cliente:
+ * qualquer um forjaria o próprio IP e escaparia do rate limit por IP que a SPEC 016 vai
+ * construir em cima disso. Confiando em 1 hop, vale a entrada que o próprio proxy
+ * acrescentou, que o cliente não controla.
+ *
+ * Fora de produção não existe proxy na frente, então confiar em qualquer header é só
+ * abrir spoofing sem ganho nenhum.
+ *
+ * ponytail: 1 hop é o desenho do Render. Se entrar CDN ou outro proxy na frente,
+ * este número sobe junto — ou vira lista de faixas confiáveis.
+ */
+export function hopsDeProxyConfiaveis(env: Env): number | false {
+  return env.NODE_ENV === 'production' ? 1 : false;
+}
+
 export async function construirApp(env: Env): Promise<FastifyInstance> {
   const app = Fastify({
     logger: { level: env.LOG_LEVEL },
-    // Confia no proxy do Render para obter o IP real do cliente — insumo do rate
-    // limit por IP da SPEC 016.
-    trustProxy: true,
+    trustProxy: hopsDeProxyConfiaveis(env),
   });
 
   app.setValidatorCompiler(validatorCompiler);
@@ -43,7 +59,16 @@ export async function construirApp(env: Env): Promise<FastifyInstance> {
     },
     transform: jsonSchemaTransform,
   });
-  await app.register(fastifySwaggerUi, { routePrefix: '/docs' });
+
+  // A UI (e o /docs/json que vem com ela) publica a superfície inteira da API sem
+  // autenticação. Hoje isso é só /health/live; conforme 001 e 012 entrarem, vira o mapa
+  // dos endpoints de autenticação e OAuth entregue de graça a quem varre a internet.
+  // O @fastify/swagger acima continua registrado em todo ambiente: ele só constrói o
+  // documento em memória, sem expor rota — é o que alimenta app.swagger() e o teste de
+  // contrato.
+  if (env.NODE_ENV !== 'production') {
+    await app.register(fastifySwaggerUi, { routePrefix: '/docs' });
+  }
 
   /**
    * Handler global: toda saída de erro sai como problem+json.
