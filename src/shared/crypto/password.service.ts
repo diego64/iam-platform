@@ -14,6 +14,7 @@
  */
 import { randomBytes, scrypt, timingSafeEqual, type ScryptOptions } from 'node:crypto';
 import { promisify } from 'node:util';
+import type { Env } from '../../config/env.js';
 
 // `promisify(scrypt)` resolve na sobrecarga de 3 argumentos (sem options), e esta SPEC
 // precisa passar `maxmem` — por isso a assinatura de 4 argumentos é declarada explícita.
@@ -29,6 +30,13 @@ export interface ParametrosScrypt {
 export interface ServicoDeSenha {
   gerarHash(senha: string): Promise<string>;
   verificar(senha: string, hashArmazenado: string): Promise<boolean>;
+  /**
+   * `true` quando o hash foi gerado com parâmetros diferentes dos correntes — sinal para
+   * re-hash oportunista no próximo login bem-sucedido (a 001 tem a senha em claro em mãos
+   * nesse instante). É como o custo evolui sem migração em massa. Hash malformado devolve
+   * `true`: o formato mudou, precisa ser regravado.
+   */
+  precisaRehash(hashArmazenado: string): boolean;
 }
 
 const PREFIXO = 'scrypt';
@@ -127,5 +135,31 @@ export function criarServicoDeSenha(params: ParametrosScrypt): ServicoDeSenha {
         timingSafeEqual(candidato, decodificado.hash)
       );
     },
+
+    precisaRehash(hashArmazenado: string): boolean {
+      const decodificado = decodificar(hashArmazenado);
+      if (decodificado === null) return true;
+
+      const atual = decodificado.params;
+      return (
+        atual.custo !== params.custo ||
+        atual.blocos !== params.blocos ||
+        atual.paralelismo !== params.paralelismo
+      );
+    },
   };
+}
+
+/** Mapeia as variáveis de ambiente validadas para os parâmetros do scrypt. */
+export function parametrosDaEnv(env: Env): ParametrosScrypt {
+  return {
+    custo: env.SCRYPT_COST,
+    blocos: env.SCRYPT_BLOCK_SIZE,
+    paralelismo: env.SCRYPT_PARALLELIZATION,
+  };
+}
+
+/** Cria o serviço já com os parâmetros vindos da configuração — usado no bootstrap. */
+export function criarServicoDeSenhaDaEnv(env: Env): ServicoDeSenha {
+  return criarServicoDeSenha(parametrosDaEnv(env));
 }

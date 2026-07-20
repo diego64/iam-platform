@@ -9,6 +9,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   criarServicoDeSenha,
+  parametrosDaEnv,
   type ParametrosScrypt,
 } from '../../../../src/shared/crypto/password.service.js';
 
@@ -71,6 +72,37 @@ describe('verificar', () => {
     const hashAntigo = await servicoAntigo.gerarHash('legada');
 
     expect(await servico.verificar('legada', hashAntigo)).toBe(true);
+  });
+});
+
+describe('precisaRehash', () => {
+  it('é false para hash gerado com os parâmetros correntes', async () => {
+    const hash = await servico.gerarHash('atual');
+
+    expect(servico.precisaRehash(hash)).toBe(false);
+  });
+
+  it('é true para hash gerado com custo defasado', async () => {
+    const servicoAntigo = criarServicoDeSenha({ custo: 2 ** 12, blocos: 8, paralelismo: 1 });
+    const hashAntigo = await servicoAntigo.gerarHash('legada');
+
+    expect(servico.precisaRehash(hashAntigo)).toBe(true);
+  });
+
+  it('é true para hash malformado — o formato mudou, precisa regravar', () => {
+    expect(servico.precisaRehash('nao-e-um-hash')).toBe(true);
+  });
+});
+
+describe('parametrosDaEnv', () => {
+  it('mapeia as variáveis de ambiente para os parâmetros do scrypt', () => {
+    const params = parametrosDaEnv({
+      SCRYPT_COST: 2 ** 15,
+      SCRYPT_BLOCK_SIZE: 8,
+      SCRYPT_PARALLELIZATION: 1,
+    } as Parameters<typeof parametrosDaEnv>[0]);
+
+    expect(params).toEqual({ custo: 2 ** 15, blocos: 8, paralelismo: 1 });
   });
 });
 

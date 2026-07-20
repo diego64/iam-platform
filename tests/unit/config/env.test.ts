@@ -176,3 +176,23 @@ describe('carregarEnv — superset e imutabilidade', () => {
     expect(env.MONGODB_DB).toBe('iam_sessions');
   });
 });
+
+describe('carregarEnv — parâmetros de scrypt (SPEC 009)', () => {
+  it('aplica os defaults do baseline (N=2^15, r=8, p=1)', () => {
+    const env = carregarEnv(fonteValida());
+
+    expect(env.SCRYPT_COST).toBe(2 ** 15);
+    expect(env.SCRYPT_BLOCK_SIZE).toBe(8);
+    expect(env.SCRYPT_PARALLELIZATION).toBe(1);
+  });
+
+  it('aceita custo que é potência de 2', () => {
+    expect(carregarEnv(fonteValida({ SCRYPT_COST: '16384' })).SCRYPT_COST).toBe(2 ** 14);
+  });
+
+  it('rejeita custo que não é potência de 2', () => {
+    const erro = capturarErro(fonteValida({ SCRYPT_COST: '30000' }));
+
+    expect(erro.variaveis.map((v) => v.nome)).toContain('SCRYPT_COST');
+  });
+});
