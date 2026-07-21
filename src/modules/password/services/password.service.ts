@@ -16,7 +16,7 @@ import type { RepositorioDeTokenDeReset } from '../repositories/reset-token.repo
 import type { RepositorioDeHistoricoDeSenha } from '../interfaces/historico.port.js';
 import type { RevogadorDeSessoes } from '../interfaces/sessoes.port.js';
 import type { CanalDeNotificacao } from '../interfaces/notificacao.port.js';
-import { avaliarPolitica } from '../validators/politica.js';
+import { avaliarPolitica, mensagemDeRejeicao } from '../validators/politica.js';
 import { ErroDeSenha } from '../errors/password-error.js';
 
 export interface DependenciasDeSenha {
@@ -44,7 +44,9 @@ export function criarPasswordService(deps: DependenciasDeSenha): PasswordService
   /** Valida política com contexto do e-mail; lança `politica` no primeiro motivo. */
   function exigirPolitica(senha: string, email: string): void {
     const resultado = avaliarPolitica(senha, { email });
-    if (!resultado.ok) throw new ErroDeSenha('politica', resultado.motivo);
+    // Guarda a mensagem já pronta e sanitizada (nunca ecoa a senha) no erro, para o
+    // controller apenas repassá-la — sem reconverter o motivo nem arriscar um cast.
+    if (!resultado.ok) throw new ErroDeSenha('politica', mensagemDeRejeicao(resultado.motivo));
   }
 
   /**

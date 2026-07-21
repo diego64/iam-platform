@@ -9,7 +9,7 @@
  */
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { montarProblema } from '../../../shared/errors/problem-json.js';
-import { mensagemDeRejeicao, POLITICA, type MotivoRejeicao } from '../validators/politica.js';
+import { POLITICA } from '../validators/politica.js';
 import { ErroDeSenha } from '../errors/password-error.js';
 import type { PasswordService } from '../services/password.service.js';
 import type { AutenticarUsuario } from '../interfaces/auth.port.js';
@@ -49,17 +49,11 @@ function responderErro(erro: ErroDeSenha, resposta: FastifyReply): void {
         .send(montarProblema('invalid-credentials', 'Credenciais inválidas', 401));
       return;
     case 'politica':
+      // `detalhe` já vem como a mensagem pronta e sanitizada do domínio — repassa direto.
       void resposta
         .status(400)
         .type(TIPO_PROBLEM_JSON)
-        .send(
-          montarProblema(
-            'validation-error',
-            'Senha inválida',
-            400,
-            mensagemDeRejeicao(erro.detalhe as MotivoRejeicao),
-          ),
-        );
+        .send(montarProblema('validation-error', 'Senha inválida', 400, erro.detalhe));
       return;
     case 'reuso':
       void resposta
