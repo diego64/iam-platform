@@ -182,8 +182,28 @@ describe('carregarEnv — superset e imutabilidade', () => {
   });
 });
 
+describe('carregarEnv — parâmetros de scrypt', () => {
+  it('aplica os defaults do baseline (N=2^15, r=8, p=1)', () => {
+    const env = carregarEnv(fonteValida());
+
+    expect(env.SCRYPT_COST).toBe(2 ** 15);
+    expect(env.SCRYPT_BLOCK_SIZE).toBe(8);
+    expect(env.SCRYPT_PARALLELIZATION).toBe(1);
+  });
+
+  it('aceita custo que é potência de 2', () => {
+    expect(carregarEnv(fonteValida({ SCRYPT_COST: '16384' })).SCRYPT_COST).toBe(2 ** 14);
+  });
+
+  it('rejeita custo que não é potência de 2', () => {
+    const erro = capturarErro(fonteValida({ SCRYPT_COST: '30000' }));
+
+    expect(erro.variaveis.map((v) => v.nome)).toContain('SCRYPT_COST');
+  });
+});
+
 /**
- * Contrato de telemetria da SPEC 015. O caso central é `METRICS_ENABLED=false`:
+ * Contrato de telemetria. O caso central é `METRICS_ENABLED=false`:
  * `z.coerce.boolean()` aplicaria `Boolean('false')` — que é `true` — e a flag de
  * desligar ligaria as métricas, sem erro nenhum para denunciar.
  */

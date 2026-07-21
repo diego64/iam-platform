@@ -1,0 +1,11 @@
+# Configuração do GitGuardian (ggshield).
+#
+# A lista em src/modules/password/constants/blocklist.ts é um conjunto de senhas comuns
+# de vazamentos públicos, usado para REJEITAR senhas fracas na criação/troca de senha.
+# São dados públicos, não credenciais deste sistema — marcá-las como segredo é
+# falso-positivo. O path é ignorado aqui, na revisão, e não no painel, para a decisão
+# ficar versionada e visível.
+version: 2
+secret:
+  ignored-paths:
+    - src/modules/password/constants/blocklist.ts

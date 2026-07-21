@@ -87,6 +87,19 @@ export const esquemaEnv = z.object({
   // requisição concluindo "fora" sem saber por quê — pior que um 503 dizendo qual caiu.
   HEALTH_TIMEOUT_MS: z.coerce.number().int().min(100).max(5_000).default(1_000),
 
+  // Parâmetros do scrypt para hash de senha. O custo é o N do scrypt e precisa ser potência de 2
+  // — o refinement rejeita valores intermediários, que o scrypt aceitaria em silêncio com
+  // custo real menor que o pretendido. Default = 2^15, o baseline do CLAUDE.md.
+  SCRYPT_COST: z.coerce
+    .number()
+    .int()
+    .min(2 ** 10)
+    .max(2 ** 20)
+    .refine((n) => (n & (n - 1)) === 0, { message: 'deve ser potência de 2' })
+    .default(2 ** 15),
+  SCRYPT_BLOCK_SIZE: z.coerce.number().int().min(1).max(32).default(8),
+  SCRYPT_PARALLELIZATION: z.coerce.number().int().min(1).max(16).default(1),
+
   ...formaTelemetria,
 });
 

@@ -6,6 +6,7 @@
 import pino, { type Logger, type LoggerOptions } from 'pino';
 import type { Writable } from 'node:stream';
 import { isSpanContextValid, trace } from '@opentelemetry/api';
+import { caminhosDeCensura } from './redact.js';
 
 export type { Logger };
 
@@ -44,7 +45,14 @@ export interface OpcoesDeLogger {
  */
 export function criarLogger(opcoes: OpcoesDeLogger = {}): Logger {
   const { nivel = 'info', destino } = opcoes;
-  const configuracao: LoggerOptions = { level: nivel, mixin: contextoDeTrace };
+  const configuracao: LoggerOptions = {
+    level: nivel,
+    // Acrescenta trace_id/span_id quando há span ativo, ligando log a trace no Grafana.
+    mixin: contextoDeTrace,
+    // Censura senha, token e hash em todo log — inclusive nos logs de requisição que o
+    // Fastify emite com o corpo. `censored` deixa claro na saída que houve redação.
+    redact: { paths: caminhosDeCensura(), censor: '[censurado]' },
+  };
 
   return destino ? pino(configuracao, destino) : pino(configuracao);
 }

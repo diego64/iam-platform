@@ -72,6 +72,12 @@ boot (`src/config/env.ts`): faltando ou malformada qualquer obrigatória, o proc
 sai com código 1 antes de abrir socket, listando o que corrigir. Ver
 `docs/decisions/adr-0004-zod-config-boundary.md`.
 
+## Senhas
+
+Hash com `scrypt` (formato versionado, re-hash transparente ao subir o custo), política de
+força nos dois lados da borda, e troca/recuperação com token de reset opaco de uso único.
+Detalhes em [`docs/security/passwords.md`](docs/security/passwords.md).
+
 ## Observabilidade
 
 `GET /metrics` em formato Prometheus, traces via OTLP e `trace_id` em todo log de
