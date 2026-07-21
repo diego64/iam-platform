@@ -1,4 +1,9 @@
 -- SPEC 002/003 — usuários e RBAC
+-- `citext` dá o UNIQUE(email) case-insensitive sem LOWER() em cada consulta. O init.sql de
+-- dev só cria `pgcrypto`, e o migrate roda contra um Postgres cru (CI) — então a extensão
+-- precisa nascer aqui, senão o tipo CITEXT abaixo não existe e a migração falha.
+CREATE EXTENSION IF NOT EXISTS citext;
+
 CREATE TABLE IF NOT EXISTS users (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   email         CITEXT UNIQUE NOT NULL,

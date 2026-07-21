@@ -100,6 +100,12 @@ export const esquemaEnv = z.object({
   SCRYPT_BLOCK_SIZE: z.coerce.number().int().min(1).max(32).default(8),
   SCRYPT_PARALLELIZATION: z.coerce.number().int().min(1).max(16).default(1),
 
+  // Admin de bootstrap (SPEC 002). Opcionais: presentes, o server cria o primeiro admin
+  // na subida (idempotente); ausentes, nada acontece. A senha nunca é logada — só o nome
+  // e o motivo, como toda variável sensível deste schema.
+  IAM_BOOTSTRAP_ADMIN_EMAIL: z.string().email().max(254).optional(),
+  IAM_BOOTSTRAP_ADMIN_PASSWORD: z.string().min(1).max(128).optional(),
+
   ...formaTelemetria,
 });
 
