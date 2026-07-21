@@ -13,6 +13,8 @@ tags:
     description: Sondas de disponibilidade consumidas por Docker e Render.
   - name: password
     description: Troca, recuperação e política de senha.
+  - name: users
+    description: Administração de usuários (CRUD e ciclo de status). Restrito a administradores.
   - name: observability
     description: Exposição de métricas para raspagem pelo Prometheus.
 servers:
@@ -65,6 +67,17 @@ components:
           type: integer
         detail:
           type: string
+    Usuario:
+      type: object
+      additionalProperties: false
+      description: Representação pública do usuário — nunca inclui o hash de senha.
+      required: [id, email, status, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        status: { type: string, enum: [active, blocked] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
   securitySchemes:
     BearerAuth:
       type: http
@@ -268,6 +281,235 @@ paths:
                     type: array
                     items: { type: string }
                   blocks_common_passwords: { type: boolean }
+  /users:
+    post:
+      tags: [users]
+      summary: Cria um usuário
+      description: Restrito a administradores. A senha passa pela política e é hasheada; nunca é retornada.
+      operationId: usersCreate
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [email, senha]
+              properties:
+                email: { type: string, format: email, maxLength: 254 }
+                senha: { type: string, minLength: 12, maxLength: 128 }
+      responses:
+        '201':
+          description: Usuário criado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Usuario' }
+        '400':
+          description: Payload inválido ou senha fora da política
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '401':
+          description: Não autenticado
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '403':
+          description: Autenticado sem papel de administrador
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '409':
+          description: E-mail já cadastrado
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '429':
+          description: Limite de tentativas excedido
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+    get:
+      tags: [users]
+      summary: Lista usuários com paginação e filtro de status
+      description: Restrito a administradores. Ordena do mais recente ao mais antigo.
+      operationId: usersList
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - {
+            in: query,
+            name: limit,
+            schema: { type: integer, minimum: 1, maximum: 100, default: 20 },
+          }
+        - { in: query, name: offset, schema: { type: integer, minimum: 0, default: 0 } }
+        - { in: query, name: status, schema: { type: string, enum: [active, blocked] } }
+      responses:
+        '200':
+          description: Página de usuários
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total, limit, offset]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Usuario' }
+                  total: { type: integer }
+                  limit: { type: integer }
+                  offset: { type: integer }
+        '401':
+          description: Não autenticado
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '403':
+          description: Autenticado sem papel de administrador
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /users/{id}:
+    parameters:
+      - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [users]
+      summary: Busca um usuário por id
+      description: Restrito a administradores. Retorna o DTO público, sem hash de senha.
+      operationId: usersGet
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: Usuário
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Usuario' }
+        '401':
+          description: Não autenticado
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '403':
+          description: Autenticado sem papel de administrador
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '404':
+          description: Usuário não encontrado
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+    patch:
+      tags: [users]
+      summary: Atualiza o e-mail de um usuário
+      description: Restrito a administradores. Único campo mutável por aqui é o e-mail.
+      operationId: usersUpdate
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [email]
+              properties:
+                email: { type: string, format: email, maxLength: 254 }
+      responses:
+        '200':
+          description: Usuário atualizado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Usuario' }
+        '400':
+          description: Payload inválido
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '404':
+          description: Usuário não encontrado
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '409':
+          description: E-mail já cadastrado
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+    delete:
+      tags: [users]
+      summary: Remove um usuário e revoga suas sessões
+      description: Restrito a administradores. Hard delete; user_roles e password_history caem por cascade.
+      operationId: usersDelete
+      security: [{ BearerAuth: [] }]
+      responses:
+        '204':
+          description: Usuário removido
+        '401':
+          description: Não autenticado
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '403':
+          description: Autenticado sem papel de administrador
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '404':
+          description: Usuário não encontrado
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /users/{id}/block:
+    post:
+      tags: [users]
+      summary: Bloqueia um usuário e revoga suas sessões
+      description: Idempotente. Bloquear derruba todas as sessões vivas do usuário.
+      operationId: usersBlock
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Estado de bloqueio do usuário
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, status]
+                properties:
+                  id: { type: string, format: uuid }
+                  status: { type: string, enum: [blocked] }
+        '404':
+          description: Usuário não encontrado
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /users/{id}/unblock:
+    post:
+      tags: [users]
+      summary: Desbloqueia um usuário
+      description: Restrito a administradores. Idempotente. Não recria sessões.
+      operationId: usersUnblock
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Estado do usuário
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, status]
+                properties:
+                  id: { type: string, format: uuid }
+                  status: { type: string, enum: [active] }
+        '404':
+          description: Usuário não encontrado
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
   /metrics:
     get:
       tags: [observability]
