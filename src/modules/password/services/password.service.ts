@@ -94,10 +94,13 @@ export function criarPasswordService(deps: DependenciasDeSenha): PasswordService
     async solicitarReset({ email, ipOrigem }): Promise<void> {
       const usuario = await usuarios.buscarPorEmail(email);
 
+      // Nenhum trabalho pesado aqui, em nenhum ramo. A defesa contra enumeração é o corpo
+      // 202 idêntico (no controller) mais o fato de esta rotina rodar FORA do caminho da
+      // resposta — o cliente recebe 202 antes de este código sequer começar, então o tempo
+      // de resposta não revela se a conta existe. Um scrypt no ramo "não existe" (a versão
+      // anterior deste código) fazia o oposto: tornava a ausência mais lenta que a
+      // presença, um oráculo de enumeração ao contrário.
       if (usuario === null || usuario.status !== 'active') {
-        // Paga o custo de um scrypt contra o hash fantasma: o caminho "não existe" leva o
-        // mesmo tempo do legítimo e não denuncia a ausência por timing.
-        await servicoDeSenha.verificar('anti-timing', await servicoDeSenha.hashFantasma());
         return;
       }
 

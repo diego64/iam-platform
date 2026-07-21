@@ -37,6 +37,8 @@ export interface AppDeSenha {
   readonly app: FastifyInstance;
   readonly notificacao: CanalDeNotificacaoFake;
   readonly sessoes: RevogadorDeSessoesFake;
+  /** Aguarda o trabalho de fundo do `forgot` (que roda depois da resposta 202). */
+  aguardarTrabalho(): Promise<void>;
 }
 
 /**
@@ -88,14 +90,26 @@ export async function montarAppDeSenha(opcoes: {
     historicoN: 3,
   });
 
+  // Coleta os trabalhos de fundo do forgot para o teste poder aguardá-los antes de
+  // asseverar o que eles produzem (token no Mongo, entrega na notificação).
+  const trabalhos: Promise<void>[] = [];
+
   registrarRotasDeSenha(app, {
     passwordService,
     autenticar: (req) => {
       const id = req.headers['x-test-user-id'];
       return typeof id === 'string' && id !== '' ? id : null;
     },
+    aoAgendarTrabalho: (trabalho) => trabalhos.push(trabalho),
   });
 
   await app.ready();
-  return { app, notificacao, sessoes };
+  return {
+    app,
+    notificacao,
+    sessoes,
+    aguardarTrabalho: async () => {
+      await Promise.all(trabalhos.splice(0));
+    },
+  };
 }

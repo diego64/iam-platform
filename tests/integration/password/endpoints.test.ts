@@ -147,6 +147,8 @@ describe('POST /auth/password/forgot', () => {
     });
 
     expect(r.statusCode).toBe(202);
+    // O token e a notificação são produzidos DEPOIS da resposta — aguarda esse trabalho.
+    await contexto.aguardarTrabalho();
     expect(contexto.notificacao.enviados.at(-1)?.email).toBe(EMAIL);
     expect(await banco.collection('password_reset_tokens').countDocuments()).toBe(1);
   });
@@ -162,13 +164,39 @@ describe('POST /auth/password/forgot', () => {
     expect(r.json()).toEqual({
       message: 'Se o e-mail existir, enviaremos instruções de recuperação.',
     });
+    await contexto.aguardarTrabalho();
     expect(await banco.collection('password_reset_tokens').countDocuments()).toBe(0);
+  });
+
+  it('a resposta não espera o trabalho de conta — nada é gerado antes do 202 (anti-timing)', async () => {
+    await semear();
+    const r = await app.inject({
+      method: 'POST',
+      url: '/auth/password/forgot',
+      payload: { email: EMAIL },
+    });
+
+    // No instante da resposta, a notificação ainda NÃO aconteceu: o trabalho que depende
+    // de a conta existir roda fora do caminho da resposta, então o tempo de resposta é o
+    // mesmo para conta existente e inexistente. A versão anterior fazia um scrypt no ramo
+    // "não existe" e vazava a ausência por timing.
+    // A checagem tem de ser SÍNCRONA (o estado em memória do fake): consultar o Mongo é
+    // async e daria ao trabalho de fundo a folga de terminar antes da asserção.
+    expect(r.statusCode).toBe(202);
+    expect(contexto.notificacao.enviados).toHaveLength(0);
+
+    // Depois de o trabalho concluir, aí sim o token existe e foi entregue.
+    await contexto.aguardarTrabalho();
+    expect(contexto.notificacao.enviados).toHaveLength(1);
+    expect(await banco.collection('password_reset_tokens').countDocuments()).toBe(1);
   });
 });
 
 describe('POST /auth/password/reset', () => {
   async function pedirToken(): Promise<string> {
     await app.inject({ method: 'POST', url: '/auth/password/forgot', payload: { email: EMAIL } });
+    // O token é gerado depois da resposta 202 — aguarda o trabalho de fundo.
+    await contexto.aguardarTrabalho();
     const token = contexto.notificacao.enviados.at(-1)?.token;
     if (token === undefined) throw new Error('sem token');
     return token;

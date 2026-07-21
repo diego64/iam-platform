@@ -24,6 +24,12 @@ const TIPO_PROBLEM_JSON = 'application/problem+json';
 export interface DependenciasDoController {
   readonly passwordService: PasswordService;
   readonly autenticar: AutenticarUsuario;
+  /**
+   * Recebe o trabalho de fundo do `forgot` (gerar/gravar token, notificar), que roda
+   * depois da resposta. Opcional: existe para o teste conseguir aguardar esse trabalho;
+   * em produção fica ausente e o trabalho é fire-and-forget mesmo.
+   */
+  readonly aoAgendarTrabalho?: (trabalho: Promise<void>) => void;
 }
 
 export interface ControllerDeSenha {
@@ -84,7 +90,7 @@ async function comTratamento(resposta: FastifyReply, acao: () => Promise<void>):
 }
 
 export function criarControllerDeSenha(deps: DependenciasDoController): ControllerDeSenha {
-  const { passwordService, autenticar } = deps;
+  const { passwordService, autenticar, aoAgendarTrabalho } = deps;
 
   return {
     async trocar(requisicao: FastifyRequest, resposta: FastifyReply): Promise<void> {
@@ -104,13 +110,24 @@ export function criarControllerDeSenha(deps: DependenciasDoController): Controll
       });
     },
 
-    async esqueci(requisicao: FastifyRequest, resposta: FastifyReply): Promise<void> {
+    esqueci(requisicao: FastifyRequest, resposta: FastifyReply): Promise<void> {
       const { email } = requisicao.body as EsqueciSenhaBody;
-      // Sempre 202, mesmo corpo — o serviço não lança por e-mail inexistente.
-      await passwordService.solicitarReset({ email, ipOrigem: requisicao.ip });
+
+      // Responde ANTES de tocar no banco: o tempo de resposta é constante e não depende de
+      // a conta existir. Gerar/gravar o token e notificar rodam depois, sem serem
+      // aguardados aqui — forgot nunca surfaça resultado (sempre 202, mesmo corpo), então
+      // nada se perde ao não esperar. A falha do trabalho de fundo vira log, não erro HTTP.
+      const trabalho = passwordService
+        .solicitarReset({ email, ipOrigem: requisicao.ip })
+        .catch((erro: unknown) => {
+          requisicao.log.warn({ err: erro }, 'password.forgot.trabalho_falhou');
+        });
+      aoAgendarTrabalho?.(trabalho);
+
       void resposta.status(202).send({
         message: 'Se o e-mail existir, enviaremos instruções de recuperação.',
       });
+      return Promise.resolve();
     },
 
     async reset(requisicao: FastifyRequest, resposta: FastifyReply): Promise<void> {

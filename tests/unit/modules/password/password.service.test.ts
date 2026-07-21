@@ -141,6 +141,45 @@ describe('solicitarReset (forgot)', () => {
     expect(notificacao.enviados[0]?.token).toMatch(/^[\w-]{43}$/);
   });
 
+  it('não executa scrypt em nenhum ramo — nem existente, nem inexistente (anti-timing)', async () => {
+    // Um scrypt só no ramo "não existe" tornaria a ausência mais lenta que a presença.
+    // Este spy conta as operações de scrypt: as duas chamadas têm de custar o mesmo (zero).
+    let opsScrypt = 0;
+    const espiao = criarPasswordService({
+      servicoDeSenha: {
+        gerarHash: (s) => {
+          opsScrypt += 1;
+          return servicoDeSenha.gerarHash(s);
+        },
+        verificar: (s, h) => {
+          opsScrypt += 1;
+          return servicoDeSenha.verificar(s, h);
+        },
+        precisaRehash: (h) => servicoDeSenha.precisaRehash(h),
+        hashFantasma: () => {
+          opsScrypt += 1;
+          return servicoDeSenha.hashFantasma();
+        },
+      },
+      usuarios,
+      tokensDeReset,
+      historico,
+      sessoes,
+      notificacao,
+      ttlResetMin: 30,
+      historicoN: 3,
+    });
+    await semearUsuario();
+
+    await espiao.solicitarReset({ email: 'user@iam.local' });
+    const aposExistente = opsScrypt;
+    await espiao.solicitarReset({ email: 'ninguem@iam.local' });
+    const aposInexistente = opsScrypt;
+
+    expect(aposExistente).toBe(0);
+    expect(aposInexistente).toBe(0);
+  });
+
   it('e-mail inexistente ⇒ não gera token e não lança (anti-enumeration)', async () => {
     await expect(service.solicitarReset({ email: 'ninguem@iam.local' })).resolves.toBeUndefined();
     expect(notificacao.enviados).toEqual([]);
