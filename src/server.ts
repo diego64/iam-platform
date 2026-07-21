@@ -17,6 +17,8 @@ import { criarLogger } from './shared/logger/index.js';
 import { criarPoolPostgres, verificarPostgres } from './database/postgres/connection.js';
 import { conectarMongo } from './database/mongodb/connection.js';
 import { garantirIndices } from './database/mongodb/indexes.js';
+import { criarServicoDeSenhaDaEnv } from './shared/crypto/password.service.js';
+import { garantirAdminDeBootstrap } from './modules/users/index.js';
 import { criarEncerrador } from './bootstrap/shutdown.js';
 import { construirApp } from './app.js';
 import { obterInstrumentos } from './telemetry/metricas.js';
@@ -66,6 +68,22 @@ async function iniciar(): Promise<void> {
 
   await garantirIndices(banco);
   logger.info('boot.indices_ok');
+
+  // Admin de bootstrap: cria o primeiro admin se as envs estiverem definidas (idempotente).
+  // Sem elas, é no-op. Roda depois dos bancos prontos e antes de aceitar tráfego.
+  await garantirAdminDeBootstrap({
+    pool,
+    servicoDeSenha: criarServicoDeSenhaDaEnv(env),
+    opcoes: {
+      ...(env.IAM_BOOTSTRAP_ADMIN_EMAIL === undefined
+        ? {}
+        : { email: env.IAM_BOOTSTRAP_ADMIN_EMAIL }),
+      ...(env.IAM_BOOTSTRAP_ADMIN_PASSWORD === undefined
+        ? {}
+        : { senha: env.IAM_BOOTSTRAP_ADMIN_PASSWORD }),
+    },
+    logger,
+  });
 
   // O controller de health não conhece pg nem mongodb: recebe verificadores prontos.
   const prontidao = criarServicoDeProntidao({
