@@ -3,8 +3,12 @@
 
 * @diego64
 
-# Áreas sensíveis — reforço de revisão
-/.github/                             @diego64
-/database/                            @diego64
-/src/infraestrutura/http/middlewares/ @diego64
-SECURITY.md                           @diego64
+# Áreas sensíveis — reforço de revisão (caminhos reais da estrutura do projeto)
+/.github/                    @diego64
+/src/config/                 @diego64
+/src/database/               @diego64
+/src/shared/crypto/          @diego64
+/src/modules/auth/           @diego64
+/src/modules/jwks/           @diego64
+/src/modules/password/       @diego64
+SECURITY.md                  @diego64
