@@ -13,6 +13,8 @@ tags:
     description: Sondas de disponibilidade consumidas por Docker e Render.
   - name: password
     description: Troca, recuperação e política de senha.
+  - name: observability
+    description: Exposição de métricas para raspagem pelo Prometheus.
 servers:
   - url: http://localhost:3000
     description: Desenvolvimento local
@@ -266,3 +268,31 @@ paths:
                     type: array
                     items: { type: string }
                   blocks_common_passwords: { type: boolean }
+  /metrics:
+    get:
+      tags: [observability]
+      summary: Métricas em formato Prometheus
+      description: >
+        Registrado apenas quando METRICS_ENABLED=true; caso contrário a rota não existe e
+        o 404 sai do handler padrão. Em produção, com METRICS_PUBLIC=false, requisição
+        vinda do proxy público também recebe 404 — o endpoint expõe topologia, nomes de
+        rota e volume de tráfego, e um 403 confirmaria a quem varre que ele existe.
+      operationId: metrics
+      security: []
+      responses:
+        '200':
+          description: Métricas em formato de exposição do Prometheus
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: |
+                # HELP iam_build_info Versão em execução
+                # TYPE iam_build_info gauge
+                iam_build_info{version="0.1.0",commit="e54a0fd",node_version="v22.14.0"} 1
+        '404':
+          description: Métricas desabilitadas por configuração ou requisição externa recusada
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'

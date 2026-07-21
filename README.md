@@ -78,6 +78,16 @@ Hash com `scrypt` (formato versionado, re-hash transparente ao subir o custo), p
 força nos dois lados da borda, e troca/recuperação com token de reset opaco de uso único.
 Detalhes em [`docs/security/passwords.md`](docs/security/passwords.md).
 
+## Observabilidade
+
+`GET /metrics` em formato Prometheus, traces via OTLP e `trace_id` em todo log de
+requisição. As métricas expostas, como abrir um trace a partir de um log e como desligar
+a telemetria estão em [`docs/observabilidade.md`](docs/observabilidade.md).
+
+> `/metrics` expõe topologia, nomes de rota e volume de tráfego — **não deve ser público**.
+> Em produção o endpoint recusa requisição vinda do proxy externo; abrir exige
+> `METRICS_PUBLIC=true`, uma decisão explícita na configuração.
+
 ## Entrega
 
 O pipeline está documentado em [`docs/ci-cd.md`](docs/ci-cd.md), incluindo o runbook de

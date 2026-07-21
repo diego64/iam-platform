@@ -32,6 +32,13 @@ RUN node -e "const p=require('./package.json'); \
 
 # ---- runtime: mínimo, sem toolchain, não-root ----
 FROM node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2 AS runtime
+
+# Commit da imagem, publicado como rótulo de iam_build_info. Sem ele, a métrica que existe
+# para dizer "qual versão estava rodando" diria "desconhecido" — inútil justamente durante
+# o incidente em que a pergunta é feita.
+ARG GIT_COMMIT=desconhecido
+ENV GIT_COMMIT=${GIT_COMMIT}
+
 ENV NODE_ENV=production
 WORKDIR /app
 

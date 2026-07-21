@@ -18,6 +18,70 @@ const IMAGEM = process.env['IMAGEM_E2E'] ?? 'iam-platform:test';
 const CONTAINER = 'iam-e2e-teste';
 const PORTA = 3050;
 
+/**
+ * Rede e nomes de serviço do `docker-compose.test.yml`.
+ *
+ * Dentro do container, `127.0.0.1` é o próprio container: as portas altas publicadas no
+ * host (55432/57017) não existem ali. O acesso é pela rede do compose, pelo nome do
+ * serviço e pela porta padrão do banco.
+ */
+const REDE_DO_COMPOSE = 'iam-platform-test_default';
+const HOST_POSTGRES = 'postgres:5432';
+const HOST_MONGO = 'mongodb:27017';
+
+function opcional(nome: string): string | undefined {
+  const valor = process.env[nome];
+  return valor === undefined || valor === '' ? undefined : valor;
+}
+
+/**
+ * Rede em que o container do teste entra.
+ *
+ * `REDE_E2E` tem precedência para o CI, que pode nomear a rede de outro jeito; o default
+ * é a rede que o `pnpm infra:test:up` cria.
+ */
+function redeDoTeste(): string {
+  return opcional('REDE_E2E') ?? REDE_DO_COMPOSE;
+}
+
+/**
+ * URLs vistas de DENTRO do container, montadas com as mesmas credenciais que o compose
+ * de teste consome. Nenhuma credencial literal versionada — o padrão é o mesmo de
+ * `tests/integration/helpers/ambiente.ts`.
+ *
+ * Vazio quando as credenciais não estão no ambiente: nesse caso os casos de ciclo de
+ * vida são pulados, em vez de falharem por configuração ausente e mascararem uma
+ * regressão real da imagem.
+ */
+function urlsDosBancos(): { postgres?: string; mongo?: string } {
+  const postgresPronta = opcional('POSTGRES_URL_E2E');
+  const mongoPronta = opcional('MONGODB_URL_E2E');
+  if (postgresPronta !== undefined && mongoPronta !== undefined) {
+    return { postgres: postgresPronta, mongo: mongoPronta };
+  }
+
+  const usuarioPg = opcional('POSTGRES_USER_TEST');
+  const senhaPg = opcional('POSTGRES_PASSWORD_TEST');
+  const bancoPg = opcional('POSTGRES_DB_TEST');
+  const usuarioMongo = opcional('MONGO_INITDB_ROOT_USERNAME_TEST');
+  const senhaMongo = opcional('MONGO_INITDB_ROOT_PASSWORD_TEST');
+
+  if (
+    usuarioPg === undefined ||
+    senhaPg === undefined ||
+    bancoPg === undefined ||
+    usuarioMongo === undefined ||
+    senhaMongo === undefined
+  ) {
+    return {};
+  }
+
+  return {
+    postgres: `postgres://${encodeURIComponent(usuarioPg)}:${encodeURIComponent(senhaPg)}@${HOST_POSTGRES}/${bancoPg}`,
+    mongo: `mongodb://${encodeURIComponent(usuarioMongo)}:${encodeURIComponent(senhaMongo)}@${HOST_MONGO}/?authSource=admin`,
+  };
+}
+
 /** Docker disponível? Sem ele os casos são pulados, não aprovados. */
 function temDocker(): boolean {
   try {
@@ -45,7 +109,8 @@ if (!podeRodar) {
   // eslint-disable-next-line no-console
   console.warn(
     `[e2e] pulado: daemon Docker ou imagem "${IMAGEM}" indisponível. ` +
-      'Rode `pnpm docker:build` (com a tag iam-platform:test) para exercitar estes casos.',
+      'O script `pnpm test:e2e` constrói a imagem antes de rodar; para construir à mão, ' +
+      '`pnpm docker:build:test`.',
   );
 }
 
@@ -159,7 +224,18 @@ descreve('imagem de produção — configuração ausente', () => {
   }, 30_000);
 });
 
-describe.skipIf(!podeRodar)('imagem de produção — ciclo de vida', () => {
+const bancos = urlsDosBancos();
+const temBancos = bancos.postgres !== undefined && bancos.mongo !== undefined;
+
+if (podeRodar && !temBancos) {
+  // eslint-disable-next-line no-console
+  console.warn(
+    '[e2e] ciclo de vida pulado: credenciais da infra de teste ausentes. ' +
+      'Rode `pnpm infra:test:up` e garanta infra/compose/.env — o script test:e2e as carrega.',
+  );
+}
+
+describe.skipIf(!podeRodar || !temBancos)('imagem de produção — ciclo de vida', () => {
   beforeAll(async () => {
     await execFileAsync('docker', ['rm', '-f', CONTAINER]).catch(() => undefined);
     await docker(
@@ -171,12 +247,12 @@ describe.skipIf(!podeRodar)('imagem de produção — ciclo de vida', () => {
       `${String(PORTA)}:3000`,
       // Entra na rede do compose de teste: dentro do container, 127.0.0.1 é o próprio
       // container, então os bancos só são alcançáveis pelo nome de serviço da rede.
-      ...(process.env['REDE_E2E'] !== undefined ? ['--network', process.env['REDE_E2E']] : []),
-      // Sem bancos alcançáveis o boot falha; estes casos exigem a infra de teste no ar.
+      '--network',
+      redeDoTeste(),
       '-e',
-      `POSTGRES_URL=${process.env['POSTGRES_URL_E2E'] ?? ''}`,
+      `POSTGRES_URL=${bancos.postgres ?? ''}`,
       '-e',
-      `MONGODB_URL=${process.env['MONGODB_URL_E2E'] ?? ''}`,
+      `MONGODB_URL=${bancos.mongo ?? ''}`,
       '-e',
       'MONGODB_DB=iam_sessions_e2e',
       IMAGEM,

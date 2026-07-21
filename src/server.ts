@@ -5,6 +5,13 @@
  *         um container que sobe com dependência quebrada passa no health check do
  *         orquestrador e passa a receber tráfego.
  */
+// PRIMEIRO import, antes de qualquer módulo da aplicação — e o teste de contrato
+// `tests/contract/ordem-telemetria.test.ts` existe só para manter assim. A instrumentação
+// automática funciona substituindo métodos de fastify, pg e mongodb; se algum deles for
+// carregado antes do sdk.start(), a substituição não acontece. Não há erro, não há aviso:
+// a telemetria simplesmente fica vazia, e isso só é descoberto durante uma investigação
+// em que o trace já era necessário.
+import { telemetria } from './telemetry/index.js';
 import { carregarEnv, ErroDeConfiguracao, reportarErroDeConfiguracao } from './config/env.js';
 import { criarLogger } from './shared/logger/index.js';
 import { criarPoolPostgres, verificarPostgres } from './database/postgres/connection.js';
@@ -12,6 +19,7 @@ import { conectarMongo } from './database/mongodb/connection.js';
 import { garantirIndices } from './database/mongodb/indexes.js';
 import { criarEncerrador } from './bootstrap/shutdown.js';
 import { construirApp } from './app.js';
+import { obterInstrumentos } from './telemetry/metricas.js';
 import { criarServicoDeProntidao } from './modules/health/services/prontidao.service.js';
 import {
   criarVerificadorMongo,
@@ -61,6 +69,7 @@ async function iniciar(): Promise<void> {
 
   // O controller de health não conhece pg nem mongodb: recebe verificadores prontos.
   const prontidao = criarServicoDeProntidao({
+    ...(telemetria.metricas ? { coletor: obterInstrumentos(env.GIT_COMMIT) } : {}),
     verificadores: [
       criarVerificadorPostgres(pool, env.HEALTH_TIMEOUT_MS),
       criarVerificadorMongo(banco, env.HEALTH_TIMEOUT_MS),
@@ -69,7 +78,7 @@ async function iniciar(): Promise<void> {
     logger,
   });
 
-  const app = await construirApp(env, { prontidao });
+  const app = await construirApp(env, { prontidao, telemetria });
 
   // Handlers ANTES do listen. Registrá-los depois deixa uma janela em que o processo
   // já aceita conexões mas ainda usa o comportamento default de SIGTERM: morte
@@ -79,6 +88,7 @@ async function iniciar(): Promise<void> {
     app,
     pool,
     mongo,
+    telemetria,
     logger,
     timeoutMs: env.SHUTDOWN_TIMEOUT_MS,
     // Marca a indisponibilidade ANTES de app.close(), para o balanceador tirar esta

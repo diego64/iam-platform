@@ -3,7 +3,12 @@
  * agregação de erros e imutabilidade do objeto resultante.
  */
 import { describe, expect, it } from 'vitest';
-import { carregarEnv, ErroDeConfiguracao, type Env } from '../../../src/config/env.js';
+import {
+  carregarConfigDeTelemetria,
+  carregarEnv,
+  ErroDeConfiguracao,
+  type Env,
+} from '../../../src/config/env.js';
 
 /** Fonte mínima válida — só as variáveis sem default. */
 function fonteValida(sobrescritas: Record<string, string> = {}): NodeJS.ProcessEnv {
@@ -177,7 +182,7 @@ describe('carregarEnv — superset e imutabilidade', () => {
   });
 });
 
-describe('carregarEnv — parâmetros de scrypt (SPEC 009)', () => {
+describe('carregarEnv — parâmetros de scrypt', () => {
   it('aplica os defaults do baseline (N=2^15, r=8, p=1)', () => {
     const env = carregarEnv(fonteValida());
 
@@ -194,5 +199,77 @@ describe('carregarEnv — parâmetros de scrypt (SPEC 009)', () => {
     const erro = capturarErro(fonteValida({ SCRYPT_COST: '30000' }));
 
     expect(erro.variaveis.map((v) => v.nome)).toContain('SCRYPT_COST');
+  });
+});
+
+/**
+ * Contrato de telemetria. O caso central é `METRICS_ENABLED=false`:
+ * `z.coerce.boolean()` aplicaria `Boolean('false')` — que é `true` — e a flag de
+ * desligar ligaria as métricas, sem erro nenhum para denunciar.
+ */
+describe('carregarEnv — contrato de telemetria (SPEC 015)', () => {
+  it.each(['false', '0', 'no', 'off', 'FALSE', ' false '])('trata %j como desligado', (valor) => {
+    expect(carregarEnv(fonteValida({ METRICS_ENABLED: valor })).METRICS_ENABLED).toBe(false);
+  });
+
+  it.each(['true', '1', 'yes'])('trata %j como ligado', (valor) => {
+    expect(carregarEnv(fonteValida({ METRICS_ENABLED: valor })).METRICS_ENABLED).toBe(true);
+  });
+
+  it('liga as métricas por padrão e mantém /metrics fechado ao público', () => {
+    const env = carregarEnv(fonteValida());
+
+    expect(env.METRICS_ENABLED).toBe(true);
+    expect(env.METRICS_PUBLIC).toBe(false);
+    expect(env.OTEL_SERVICE_NAME).toBe('iam-platform');
+    expect(env.OTEL_EXPORTER_OTLP_ENDPOINT).toBeUndefined();
+    expect(env.OTEL_TRACES_SAMPLER_ARG).toBe(0.1);
+  });
+
+  it.each(['0', '1', '0.25'])('aceita %j como proporção de amostragem', (valor) => {
+    expect(
+      carregarEnv(fonteValida({ OTEL_TRACES_SAMPLER_ARG: valor })).OTEL_TRACES_SAMPLER_ARG,
+    ).toBe(Number(valor));
+  });
+
+  it.each(['-0.1', '1.5'])('rejeita %j como proporção de amostragem', (valor) => {
+    const erro = capturarErro(fonteValida({ OTEL_TRACES_SAMPLER_ARG: valor }));
+
+    expect(erro.variaveis.map((v) => v.nome)).toContain('OTEL_TRACES_SAMPLER_ARG');
+  });
+
+  it('rejeita endpoint OTLP que não é URL', () => {
+    const erro = capturarErro(fonteValida({ OTEL_EXPORTER_OTLP_ENDPOINT: 'nao-e-url' }));
+
+    expect(erro.variaveis.map((v) => v.nome)).toContain('OTEL_EXPORTER_OTLP_ENDPOINT');
+  });
+});
+
+describe('carregarConfigDeTelemetria — leitura antecipada, sem lançar', () => {
+  it('não exige as variáveis obrigatórias do resto da configuração', () => {
+    const config = carregarConfigDeTelemetria({});
+
+    expect(config.METRICS_ENABLED).toBe(true);
+    expect(config.OTEL_SERVICE_NAME).toBe('iam-platform');
+  });
+
+  it('lê a configuração válida informada', () => {
+    const config = carregarConfigDeTelemetria({
+      METRICS_ENABLED: 'false',
+      OTEL_EXPORTER_OTLP_ENDPOINT: 'http://collector:4318',
+      OTEL_TRACES_SAMPLER_ARG: '1',
+    });
+
+    expect(config.METRICS_ENABLED).toBe(false);
+    expect(config.OTEL_EXPORTER_OTLP_ENDPOINT).toBe('http://collector:4318');
+    expect(config.OTEL_TRACES_SAMPLER_ARG).toBe(1);
+  });
+
+  it('cai nos defaults em vez de lançar quando a configuração é inválida', () => {
+    // Telemetria roda antes de existir logger ou handler de erro: lançar aqui derrubaria
+    // o processo por causa de uma variável de diagnóstico.
+    const config = carregarConfigDeTelemetria({ OTEL_TRACES_SAMPLER_ARG: '99' });
+
+    expect(config.OTEL_TRACES_SAMPLER_ARG).toBe(0.1);
   });
 });
