@@ -77,6 +77,13 @@ describe('sem endpoint OTLP, o pipeline de traces não sobe de verdade', () => {
     // enquanto o SDK exportava mesmo assim, e o flush do encerramento passava ~8 s
     // esperando um coletor que não existe. Sem TracerProvider, o tracer global segue
     // sendo o no-op, e span no-op não grava.
+    //
+    // Isolamento: o `trace` global do OTel mora em `globalThis` e sobrevive ao reset de
+    // módulos do vitest. Uma suíte de integração de telemetria (com OTLP real) que rode
+    // antes desta, no mesmo processo do `test:coverage`, deixa um TracerProvider gravando
+    // registrado no global — e aí `isRecording()` daria true por herança, não pelo que
+    // `iniciarTelemetria` faz. Zeramos o global para medir só o efeito desta função.
+    trace.disable();
     const telemetria = subir();
     const span = trace.getTracer('teste').startSpan('operacao');
     const gravando = span.isRecording();
