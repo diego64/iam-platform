@@ -18,7 +18,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         # fetch-depth 0: o TruffleHog varre o histórico, não só o estado final.
         # Corrigir um arquivo não remove o segredo do commit que o introduziu.
         with: { fetch-depth: 0 }
@@ -45,7 +45,7 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/dependency-review-action@v5
         with:
           fail-on-severity: moderate
@@ -58,7 +58,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with: { node-version: 22, cache: pnpm }
@@ -73,7 +73,7 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: semgrep/semgrep-action@v1
         with:
           config: 'p/owasp-top-ten p/nodejs p/jwt'
@@ -84,7 +84,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -109,7 +109,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: anchore/sbom-action@v0
         with:
           format: cyclonedx-json
