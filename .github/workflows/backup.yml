@@ -12,7 +12,7 @@ jobs:
   backup:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Backup PostgreSQL
         env: { POSTGRES_URL: '${{ secrets.PROD_POSTGRES_URL }}' }
         run: bash scripts/backup.sh --postgres
