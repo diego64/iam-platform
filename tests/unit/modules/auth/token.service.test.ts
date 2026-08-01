@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { createPrivateKey } from 'node:crypto';
-import { importJWK, jwtVerify, decodeProtectedHeader } from 'jose';
+import { importJWK, jwtVerify, decodeProtectedHeader, type JWTVerifyResult } from 'jose';
 import { criarTokenService } from '../../../../src/modules/auth/services/token.service.js';
 import { gerarParEd25519 } from '../../../../src/modules/jwks/services/key-factory.js';
 import { ChavePrivada } from '../../../../src/shared/crypto/private-key.js';
@@ -66,7 +66,7 @@ describe('TokenService.emitir', () => {
   it('inclui o sid nos claims quando informado, e omite quando ausente', async () => {
     const { service, publicJwk } = await montar();
     const publica = await importJWK(publicJwk, 'EdDSA');
-    const verificar = (token: string): ReturnType<typeof jwtVerify> =>
+    const verificar = (token: string): Promise<JWTVerifyResult> =>
       jwtVerify(token, publica, {
         algorithms: ['EdDSA'],
         issuer: CONFIG.emissor,
