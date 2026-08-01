@@ -124,6 +124,26 @@ export const esquemaEnv = z.object({
     .max(60 * 60 * 1000)
     .default(5 * 60 * 1000),
 
+  // Emissão de token de acesso: emissor, audiência e TTL do access token (segundos).
+  // O TTL casa com a janela de graça do JWKS — nenhum token válido fica sem chave.
+  JWT_ISSUER: z.string().url().default('https://iam.example.com'),
+  JWT_AUDIENCE: z.string().min(1).default('iam-clients'),
+  ACCESS_TOKEN_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .min(60)
+    .max(60 * 60)
+    .default(15 * 60),
+
+  // Rate limit do login por IP. Teto apertado: login é alvo clássico de brute force.
+  RATE_LIMIT_LOGIN_MAX: z.coerce.number().int().min(1).default(5),
+  RATE_LIMIT_LOGIN_WINDOW_MS: z.coerce
+    .number()
+    .int()
+    .min(1000)
+    .max(60 * 60 * 1000)
+    .default(60 * 1000),
+
   // Admin de bootstrap (SPEC 002). Opcionais: presentes, o server cria o primeiro admin
   // na subida (idempotente); ausentes, nada acontece. A senha nunca é logada — só o nome
   // e o motivo, como toda variável sensível deste schema.
