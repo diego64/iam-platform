@@ -1,7 +1,7 @@
 /**
- * Porta do refresh token. A emissão/rotação/persistência do token opaco é da SPEC 005;
+ * Porta do refresh token. A emissão/rotação/persistência do token opaco é de outro módulo;
  * aqui o login só precisa emitir um e o logout revogar. O concreto entra por injeção — um
- * stub cumpre o contrato até a SPEC 005 existir.
+ * stub cumpre o contrato enquanto o token persistente não existe.
  */
 export interface PortaDeRefreshToken {
   /** Emite um refresh token opaco para o usuário. */

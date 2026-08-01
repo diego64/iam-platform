@@ -19,7 +19,7 @@ export interface UsuarioAutenticado {
   readonly scope: string;
 }
 
-/** Par de tokens emitido no login. O refresh é opaco (o concreto é da SPEC 005). */
+/** Par de tokens emitido no login. O refresh é opaco (o concreto vem do token persistente). */
 export interface ParDeTokens {
   readonly accessToken: string;
   readonly refreshToken: string;

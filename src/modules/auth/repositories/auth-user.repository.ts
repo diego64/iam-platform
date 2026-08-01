@@ -4,7 +4,7 @@
  * Consumido por: o `AuthService`.
  * Regras:
  *  - Recebe o `Pool` por injeção; SQL parametrizado; colunas nominais.
- *  - Só leitura: a escrita de usuários/papéis pertence às SPECs 002/003.
+ *  - Só leitura: a escrita de usuários e papéis pertence aos módulos de usuário e de RBAC.
  */
 import type { Pool } from 'pg';
 import type { StatusDeUsuario } from '../../users/entities/user.entity.js';
