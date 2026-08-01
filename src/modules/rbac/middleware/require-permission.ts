@@ -40,8 +40,9 @@ export interface DependenciasDoGuard {
 }
 
 export interface GuardsDeAutorizacao {
-  exigirPermissao(...requeridas: string[]): GuardDeAutorizacao;
-  exigirPapel(...papeis: string[]): GuardDeAutorizacao;
+  // Propriedades-função (não métodos): são fábricas puras, destináveis sem `this`.
+  readonly exigirPermissao: (...requeridas: string[]) => GuardDeAutorizacao;
+  readonly exigirPapel: (...papeis: string[]) => GuardDeAutorizacao;
 }
 
 export function criarGuardsDeAutorizacao(deps: DependenciasDoGuard = {}): GuardsDeAutorizacao {
