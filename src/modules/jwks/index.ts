@@ -7,6 +7,10 @@ export {
 export { criarRepositorioJwks, type RepositorioJwks } from './repositories/jwks.repository.js';
 export { gerarParEd25519, type ParDeChaves } from './services/key-factory.js';
 export {
+  garantirChaveDeBootstrap,
+  type OpcoesDeBootstrapDeChave,
+} from './services/bootstrap-key.js';
+export {
   criarMedidorDeJwks,
   medidorDeJwksNulo,
   type MedidorDeJwks,

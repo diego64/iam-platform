@@ -19,6 +19,11 @@ import { conectarMongo } from './database/mongodb/connection.js';
 import { garantirIndices } from './database/mongodb/indexes.js';
 import { criarServicoDeSenhaDaEnv } from './shared/crypto/password.service.js';
 import { garantirAdminDeBootstrap } from './modules/users/index.js';
+import {
+  criarJwksService,
+  criarRepositorioJwks,
+  criarMedidorDeJwks,
+} from './modules/jwks/index.js';
 import { criarEncerrador } from './bootstrap/shutdown.js';
 import { construirApp } from './app.js';
 import { obterInstrumentos } from './telemetry/metricas.js';
@@ -52,6 +57,25 @@ async function iniciar(): Promise<void> {
     logger.info('boot.postgres_ok');
   } catch (erro) {
     logger.fatal({ err: erro }, 'boot.postgres_falhou');
+    process.exit(1);
+  }
+
+  // Serviço de chaves: decifra a chave ativa uma vez aqui. Se houver chave a decifrar e a
+  // MASTER_KEY faltar ou estiver errada, iniciar() lança e o processo cai — em vez de subir
+  // servindo tokens que ninguém consegue verificar.
+  const jwks = criarJwksService({
+    repo: criarRepositorioJwks(pool),
+    graceMs: env.JWKS_GRACE_PERIOD_MS,
+    cacheTtlMs: env.JWKS_CACHE_TTL_MS,
+    ...(env.MASTER_KEY === undefined ? {} : { masterKey: env.MASTER_KEY }),
+    ...(telemetria.metricas ? { medidor: criarMedidorDeJwks() } : {}),
+  });
+  try {
+    await jwks.iniciar();
+    logger.info('boot.jwks_ok');
+  } catch (erro) {
+    logger.fatal({ err: erro }, 'boot.jwks_falhou');
+    await pool.end();
     process.exit(1);
   }
 
@@ -96,7 +120,7 @@ async function iniciar(): Promise<void> {
     logger,
   });
 
-  const app = await construirApp(env, { prontidao, telemetria });
+  const app = await construirApp(env, { prontidao, telemetria, jwks });
 
   // Handlers ANTES do listen. Registrá-los depois deixa uma janela em que o processo
   // já aceita conexões mas ainda usa o comportamento default de SIGTERM: morte
