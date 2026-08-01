@@ -40,6 +40,12 @@ describe('garantirIndices — refresh_tokens', () => {
     expect(indices.has('user_id_1')).toBe(true);
   });
 
+  it('cria índice de busca por family_id (revogação de família)', async () => {
+    const indices = await indicesDe('refresh_tokens');
+
+    expect(indices.has('family_id_1')).toBe(true);
+  });
+
   it('cria índice TTL em expires_at com expireAfterSeconds 0', async () => {
     const indices = await indicesDe('refresh_tokens');
 
