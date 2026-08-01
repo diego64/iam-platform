@@ -17,6 +17,10 @@ COPY tsconfig.json tsconfig.build.json ./
 COPY src ./src
 RUN pnpm build
 
+# tsc só emite JS; os .sql das migrations precisam ir junto para o migrate runner os achar
+# em runtime (dist/database/migrations), já que o preDeploy roda contra a imagem, não o src.
+RUN mkdir -p dist/database/migrations && cp src/database/migrations/*.sql dist/database/migrations/
+
 # Remove as devDependencies do node_modules que será copiado para o runtime.
 # --ignore-scripts é obrigatório: prune reexecuta o "prepare", que chama husky —
 # e o husky acabou de ser removido por ser devDependency.
@@ -64,4 +68,8 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 --start-period=10s \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-CMD ["node", "dist/server.js"]
+# Migrations no start: o preDeployCommand do Render exige plano pago, indisponível no free.
+# Idempotente (schema_migrations + IF NOT EXISTS) e single-instance no free, então rodar aqui
+# é seguro. ponytail: se escalar para N réplicas, mover de volta para preDeployCommand — N
+# containers migrando em paralelo podem colidir no INSERT de schema_migrations.
+CMD ["sh", "-c", "node dist/database/migrate.js && node dist/server.js"]
