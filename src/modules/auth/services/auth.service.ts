@@ -86,8 +86,16 @@ export function criarAuthService(deps: DependenciasDoAuthService): AuthService {
         throw new ErroDeAutenticacao('credencial-invalida');
       }
 
-      const roles = await deps.repo.papeisDoUsuario(usuario.id);
-      const emitido = await deps.tokenService.emitir({ sub: usuario.id, roles, scope });
+      const [roles, permissions] = await Promise.all([
+        deps.repo.papeisDoUsuario(usuario.id),
+        deps.repo.permissoesEfetivas(usuario.id),
+      ]);
+      const emitido = await deps.tokenService.emitir({
+        sub: usuario.id,
+        roles,
+        permissions,
+        scope,
+      });
       const refreshToken = await deps.refreshToken.emitir(usuario.id);
 
       medidor.contarSucesso();

@@ -60,6 +60,7 @@ function montar(): Fakes {
     Promise.resolve({ id: 'u1', email: 'a@iam.local', status: 'active' }),
   );
   const papeisDoUsuario = vi.fn(() => Promise.resolve(['admin']));
+  const permissoesEfetivas = vi.fn(() => Promise.resolve(['users:read']));
   const emitir = vi.fn<() => Promise<TokenEmitido>>(() =>
     Promise.resolve({ token: 'jwt-novo', jti: 'j2', expiraEm: new Date(), ttlSegundos: 900 }),
   );
@@ -72,7 +73,7 @@ function montar(): Fakes {
 
   const service = criarRefreshTokenService({
     repo: { registrar, buscarPorHash, rotacionarAtomico, revogarFamilia },
-    usuarios: { buscarPorId, papeisDoUsuario },
+    usuarios: { buscarPorId, papeisDoUsuario, permissoesEfetivas },
     tokenService: { emitir },
     ttlIdleMs: 60_000,
     ttlAbsolutoMs: 3_600_000,

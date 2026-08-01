@@ -54,6 +54,7 @@ function repoFake(
         usuario === null ? null : { id: usuario.id, email: usuario.email, status: usuario.status },
       ),
     papeisDoUsuario: () => Promise.resolve(usuario?.roles ?? []),
+    permissoesEfetivas: () => Promise.resolve([]),
   };
 }
 
