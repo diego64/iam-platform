@@ -25,6 +25,12 @@ const CAMPOS_SENSIVEIS = [
   'access_token',
   'password_hash',
   'authorization',
+  // Material de chave de assinatura: a privada cifrada, a privada em claro e a chave-mestra
+  // jamais podem cair no log — retido e indexado por muito mais tempo que a sessão.
+  'private_key_enc',
+  'privateKey',
+  'master_key',
+  'd',
 ] as const;
 
 /** Monta os caminhos de censura para o Pino a partir dos campos sensíveis. */
