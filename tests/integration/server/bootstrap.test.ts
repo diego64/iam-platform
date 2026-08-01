@@ -10,7 +10,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createServer } from 'node:net';
+import { Pool } from 'pg';
 import { urlMongoDeTeste, urlPostgresDeTeste } from '../helpers/ambiente.js';
+import { recriarSchemaJwks } from '../jwks/schema.js';
 
 const CAMINHO_SERVIDOR = new URL('../../../dist/server.js', import.meta.url).pathname;
 
@@ -82,10 +84,17 @@ async function executarServidor(
   });
 }
 
-beforeAll(() => {
+beforeAll(async () => {
   if (!existsSync(CAMINHO_SERVIDOR)) {
     throw new Error('dist/server.js ausente — rode `pnpm build` antes destes testes.');
   }
+  // O boot lê a tabela `jwks`. Garante que ela exista e esteja VAZIA — o cenário de
+  // instalação nova (migração aplicada, nenhuma chave ainda), em que o servidor sobe sem
+  // MASTER_KEY. Sem isto, uma chave active deixada por outro teste de integração faria o
+  // boot falhar closed (correto em produção, ruído aqui) e poluiria estes casos.
+  const pool = new Pool({ connectionString: urlPostgresDeTeste(), max: 1 });
+  await recriarSchemaJwks(pool);
+  await pool.end();
 });
 
 afterAll(() => {
