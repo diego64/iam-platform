@@ -17,6 +17,10 @@ COPY tsconfig.json tsconfig.build.json ./
 COPY src ./src
 RUN pnpm build
 
+# tsc só emite JS; os .sql das migrations precisam ir junto para o migrate runner os achar
+# em runtime (dist/database/migrations), já que o preDeploy roda contra a imagem, não o src.
+RUN mkdir -p dist/database/migrations && cp src/database/migrations/*.sql dist/database/migrations/
+
 # Remove as devDependencies do node_modules que será copiado para o runtime.
 # --ignore-scripts é obrigatório: prune reexecuta o "prepare", que chama husky —
 # e o husky acabou de ser removido por ser devDependency.
