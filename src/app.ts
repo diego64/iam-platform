@@ -24,6 +24,8 @@ import type { Telemetria } from './telemetry/sdk.js';
 import { obterInstrumentos, rotuloDeRota } from './telemetry/metricas.js';
 import { rotaIsenta } from './telemetry/rotas-isentas.js';
 import { registrarRotaDeMetrics } from './modules/metrics/index.js';
+import { registrarRotasDeJwks } from './modules/jwks/index.js';
+import type { JwksService } from './modules/jwks/index.js';
 
 const TIPO_PROBLEM_JSON = 'application/problem+json';
 
@@ -58,6 +60,11 @@ export interface DependenciasDoApp {
    * ruído e lentidão.
    */
   readonly telemetria?: Telemetria;
+  /**
+   * Serviço de chaves. Ausente, o app sobe sem o endpoint `/.well-known/jwks.json` — os
+   * testes que só exercitam outras rotas não precisam de chaves nem de banco.
+   */
+  readonly jwks?: JwksService;
 }
 
 /** Prontidão degenerada: usada quando o app sobe sem dependências injetadas. */
@@ -188,6 +195,10 @@ export async function construirApp(
   registrarRotasDeHealth(app, {
     prontidao: dependencias.prontidao ?? prontidaoIndisponivel(),
   });
+
+  if (dependencias.jwks !== undefined) {
+    registrarRotasDeJwks(app, { jwks: dependencias.jwks });
+  }
 
   await app.ready();
   return app;

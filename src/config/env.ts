@@ -100,6 +100,30 @@ export const esquemaEnv = z.object({
   SCRYPT_BLOCK_SIZE: z.coerce.number().int().min(1).max(32).default(8),
   SCRYPT_PARALLELIZATION: z.coerce.number().int().min(1).max(16).default(1),
 
+  // Segredo que decifra a chave privada de assinatura em repouso. Opcional no schema: uma
+  // instância sem chave ainda gerada sobe sem ele; havendo chave active, o serviço de chaves
+  // exige o segredo no boot e aborta se faltar. Como toda variável sensível, só o nome e o
+  // motivo são logados — nunca o valor.
+  MASTER_KEY: z.string().min(32).optional(),
+
+  // Janela de graça em que uma chave aposentada ainda verifica tokens emitidos antes da
+  // rotação. Default 15 min = TTL do access token: nenhum token válido fica órfão de chave.
+  JWKS_GRACE_PERIOD_MS: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .max(24 * 60 * 60 * 1000)
+    .default(15 * 60 * 1000),
+
+  // TTL de segurança do cache do conjunto de chaves. Cobre réplicas sem event bus: é o teto
+  // de defasagem até uma chave nova aparecer em todas as instâncias.
+  JWKS_CACHE_TTL_MS: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .max(60 * 60 * 1000)
+    .default(5 * 60 * 1000),
+
   // Admin de bootstrap (SPEC 002). Opcionais: presentes, o server cria o primeiro admin
   // na subida (idempotente); ausentes, nada acontece. A senha nunca é logada — só o nome
   // e o motivo, como toda variável sensível deste schema.

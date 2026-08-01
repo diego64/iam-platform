@@ -62,12 +62,30 @@ describe('censura do logger', () => {
     expect(texto).not.toContain('Bearer abc.def.ghi');
   });
 
+  it('remove material de chave de assinatura', () => {
+    const { linhas, destino } = capturar();
+
+    criarLogger({ destino }).info(
+      { private_key_enc: 'BLOB-CIFRADO-XYZ', master_key: 'MK-SUPER-SECRETA-32-CHARS-000000' },
+      'jwks.gerada',
+    );
+
+    const texto = JSON.stringify(linhas[0]);
+    expect(texto).not.toContain('BLOB-CIFRADO-XYZ');
+    expect(texto).not.toContain('MK-SUPER-SECRETA');
+    expect(texto).toContain('[censurado]');
+  });
+
   it('os caminhos cobrem os campos sensíveis conhecidos', () => {
     const caminhos = caminhosDeCensura();
 
     for (const campo of ['senha', 'senha_atual', 'senha_nova', 'token', 'password_hash']) {
       expect(caminhos).toContain(campo);
       expect(caminhos).toContain(`req.body.${campo}`);
+    }
+    // Campos de material de chave de assinatura.
+    for (const campo of ['private_key_enc', 'privateKey', 'master_key', 'd']) {
+      expect(caminhos).toContain(campo);
     }
   });
 });
