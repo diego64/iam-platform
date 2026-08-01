@@ -21,6 +21,8 @@ export interface DadosParaToken {
   readonly sub: string;
   readonly roles: string[];
   readonly scope: string;
+  /** Identificador da sessão (família de refresh). Vai como claim `sid` quando presente. */
+  readonly sid?: string;
 }
 
 export interface TokenEmitido {
@@ -45,7 +47,12 @@ export function criarTokenService(
       const iat = Math.floor(Date.now() / 1000);
       const exp = iat + config.ttlSegundos;
 
-      const token = await new SignJWT({ scope: dados.scope, roles: dados.roles })
+      const carga = {
+        scope: dados.scope,
+        roles: dados.roles,
+        ...(dados.sid ? { sid: dados.sid } : {}),
+      };
+      const token = await new SignJWT(carga)
         .setProtectedHeader({ alg: 'EdDSA', kid })
         .setSubject(dados.sub)
         .setJti(jti)

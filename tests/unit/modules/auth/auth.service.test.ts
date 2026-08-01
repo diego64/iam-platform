@@ -64,6 +64,7 @@ function montar(
   service: ReturnType<typeof criarAuthService>;
   fantasmaUsado: () => boolean;
   emitir: ReturnType<typeof vi.fn>;
+  emitirRefresh: ReturnType<typeof vi.fn>;
   revogar: ReturnType<typeof vi.fn>;
   revogarRefresh: ReturnType<typeof vi.fn>;
   contarFalha: ReturnType<typeof vi.fn>;
@@ -74,6 +75,9 @@ function montar(
     Promise.resolve({ token: 'jwt-abc', jti: 'j1', expiraEm: new Date(), ttlSegundos: 900 }),
   );
   const revogar = vi.fn(() => Promise.resolve());
+  const emitirRefresh = vi.fn(() =>
+    Promise.resolve({ token: 'refresh-opaco', sessionId: 'sess-1' }),
+  );
   const revogarRefresh = vi.fn(() => Promise.resolve());
   const contarFalha = vi.fn();
   const contarSucesso = vi.fn();
@@ -82,14 +86,26 @@ function montar(
     repo: repoFake(usuario),
     servicoDeSenha: servico,
     tokenService: { emitir },
-    refreshToken: { emitir: () => Promise.resolve('refresh-opaco'), revogar: revogarRefresh },
+    refreshToken: { emitir: emitirRefresh, revogar: revogarRefresh },
     denylist: { revogar, estaRevogado: () => Promise.resolve(false) },
     medidor: { contarFalha, contarSucesso, observarValidacao: () => undefined },
     ...sobrescritas,
   });
 
-  return { service, fantasmaUsado, emitir, revogar, revogarRefresh, contarFalha, contarSucesso };
+  return {
+    service,
+    fantasmaUsado,
+    emitir,
+    emitirRefresh,
+    revogar,
+    revogarRefresh,
+    contarFalha,
+    contarSucesso,
+  };
 }
+
+/** Contexto de sessão fixo para os testes de login. */
+const CTX = { ip: '203.0.113.1', userAgent: 'vitest' };
 
 describe('login', () => {
   it('emite o par de tokens no caminho feliz', async () => {
@@ -100,7 +116,7 @@ describe('login', () => {
       roles: ['admin'],
     });
 
-    const par = await service.login({ email: 'a@iam.local', senha: 'correta' });
+    const par = await service.login({ email: 'a@iam.local', senha: 'correta' }, CTX);
     expect(par).toEqual({
       accessToken: 'jwt-abc',
       refreshToken: 'refresh-opaco',
@@ -112,9 +128,9 @@ describe('login', () => {
   it('usuário inexistente paga o hash fantasma e falha genérico', async () => {
     const { service, fantasmaUsado, contarFalha } = montar(null);
 
-    await expect(service.login({ email: 'x@iam.local', senha: 'qualquer' })).rejects.toBeInstanceOf(
-      ErroDeAutenticacao,
-    );
+    await expect(
+      service.login({ email: 'x@iam.local', senha: 'qualquer' }, CTX),
+    ).rejects.toBeInstanceOf(ErroDeAutenticacao);
     expect(fantasmaUsado()).toBe(true);
     expect(contarFalha).toHaveBeenCalledWith('desconhecido');
   });
@@ -127,9 +143,9 @@ describe('login', () => {
       roles: [],
     });
 
-    await expect(service.login({ email: 'a@iam.local', senha: 'errada' })).rejects.toBeInstanceOf(
-      ErroDeAutenticacao,
-    );
+    await expect(
+      service.login({ email: 'a@iam.local', senha: 'errada' }, CTX),
+    ).rejects.toBeInstanceOf(ErroDeAutenticacao);
     expect(contarFalha).toHaveBeenCalledWith('senha');
   });
 
@@ -141,9 +157,9 @@ describe('login', () => {
       roles: [],
     });
 
-    await expect(service.login({ email: 'a@iam.local', senha: 'correta' })).rejects.toBeInstanceOf(
-      ErroDeAutenticacao,
-    );
+    await expect(
+      service.login({ email: 'a@iam.local', senha: 'correta' }, CTX),
+    ).rejects.toBeInstanceOf(ErroDeAutenticacao);
     expect(contarFalha).toHaveBeenCalledWith('bloqueado');
     expect(emitir).not.toHaveBeenCalled();
   });

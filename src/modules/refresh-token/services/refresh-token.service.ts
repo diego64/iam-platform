@@ -1,15 +1,19 @@
 /**
- * Responsabilidade: emitir, rotacionar e revogar refresh tokens opacos com detecção de reuso.
- * Consumido por: o login/logout (via `PortaDeRefreshToken`) e a rota `POST /auth/refresh`
- * (via `rotacionar`).
+ * Responsabilidade: emitir, rotacionar e revogar refresh tokens opacos com detecção de reuso,
+ * e ser o ponto único por onde o ciclo de vida de uma sessão passa.
+ * Consumido por: o login/logout (via `PortaDeRefreshToken`) e a rota de rotação (via `rotacionar`).
  * Regras:
  *  - Implementa a `PortaDeRefreshToken` (o concreto que substitui o stub em memória) e
- *    acrescenta `rotacionar`, que a porta não precisa conhecer.
+ *    acrescenta `rotacionar` e `revogarFamilia`.
  *  - Rotação de uso único: cada token vira `rotated` na primeira troca; reapresentá-lo
  *    (fora da janela de graça) derruba a família inteira. Fail closed: erro de I/O no
- *    lookup/rotação recusa o token (401), nunca deixa passar.
- *  - Nenhum Fastify nem driver aqui: repositório, leitura de usuário e emissor de token
- *    entram por injeção. O log fica na borda HTTP (controller), com o `trace_id`.
+ *    lookup/rotação recusa o token, nunca deixa passar.
+ *  - A família é a sessão. Abrir, tocar (a cada rotação) e encerrar uma família disparam
+ *    callbacks opcionais — é assim que a listagem de sessões reflete o que acontece aqui sem
+ *    este módulo conhecer a coleção de sessões. Os callbacks são best-effort: falhar em
+ *    atualizar o metadado da sessão não pode derrubar a autenticação.
+ *  - Nenhum Fastify nem driver aqui: repositório, leitura de usuário, emissor de token e os
+ *    callbacks de sessão entram por injeção.
  */
 import { gerarTokenOpaco, digerirToken } from './opaque-token.js';
 import { ErroDeRefreshInvalido } from '../errors/refresh-token-error.js';
@@ -17,9 +21,27 @@ import { medidorDeRefreshNulo, type MedidorDeRefresh } from '../metrics/refresh.
 import type { RepositorioDeRefreshToken } from '../repositories/refresh-token.repository.js';
 import type { RepositorioDeAutenticacao } from '../../auth/repositories/auth-user.repository.js';
 import type { TokenService } from '../../auth/services/token.service.js';
-import type { PortaDeRefreshToken } from '../../auth/interfaces/refresh-token.port.js';
+import type {
+  ContextoDeSessao,
+  PortaDeRefreshToken,
+  RefreshEmitido,
+} from '../../auth/interfaces/refresh-token.port.js';
 import type { ParDeTokens } from '../../auth/types/auth.types.js';
 import { uuidv7 } from '../../../shared/crypto/uuidv7.js';
+
+/** Por que uma família (sessão) foi encerrada — usado para atribuir a métrica de revogação. */
+export type MotivoDeRevogacaoDeFamilia =
+  'logout' | 'reuso' | 'bloqueio' | 'sessao_unica' | 'sessao_demais';
+
+/** Dados que abrem o registro de metadados de uma sessão nova. */
+export interface DadosDeAberturaDeSessao {
+  readonly sessionId: string;
+  readonly userId: string;
+  readonly ip: string | null;
+  readonly userAgent: string | null;
+  /** Teto absoluto da família — quando o registro da sessão pode expirar sozinho. */
+  readonly expiraEm: Date;
+}
 
 export interface DependenciasDoRefreshTokenService {
   readonly repo: RepositorioDeRefreshToken;
@@ -35,11 +57,22 @@ export interface DependenciasDoRefreshTokenService {
   /** Scope padrão dos tokens reemitidos (igual ao do login por senha). */
   readonly scopePadrao?: string;
   readonly medidor?: MedidorDeRefresh;
+  /** Abre o registro de metadados de uma sessão nova (best-effort). */
+  readonly aoAbrirSessao?: (dados: DadosDeAberturaDeSessao) => Promise<void>;
+  /** Marca "visto por último" da sessão a cada rotação (best-effort). */
+  readonly aoTocarSessao?: (sessionId: string) => Promise<void>;
+  /** Reflete o encerramento da família no registro da sessão (best-effort). */
+  readonly aoRevogarFamilia?: (
+    sessionId: string,
+    motivo: MotivoDeRevogacaoDeFamilia,
+  ) => Promise<void>;
 }
 
 export interface RefreshTokenService extends PortaDeRefreshToken {
   /** Troca um refresh token válido por um novo par (access + refresh). Lança em qualquer falha. */
   rotacionar(refreshToken: string): Promise<ParDeTokens>;
+  /** Encerra uma família inteira (todos os tokens ativos) e reflete na sessão. */
+  revogarFamilia(familyId: string, motivo: MotivoDeRevogacaoDeFamilia): Promise<void>;
 }
 
 export function criarRefreshTokenService(
@@ -65,11 +98,36 @@ export function criarRefreshTokenService(
     return token;
   }
 
+  /** Mata a família nos tokens e, em seguida, reflete na sessão (sem deixar o reflexo quebrar). */
+  async function encerrarFamilia(
+    familyId: string,
+    motivo: MotivoDeRevogacaoDeFamilia,
+  ): Promise<void> {
+    await deps.repo.revogarFamilia(familyId);
+    try {
+      await deps.aoRevogarFamilia?.(familyId, motivo);
+    } catch {
+      /* reflexo na sessão é best-effort; os tokens já foram revogados */
+    }
+  }
+
   return {
-    async emitir(userId: string): Promise<string> {
+    async emitir(userId: string, contexto: ContextoDeSessao): Promise<RefreshEmitido> {
       const familyId = uuidv7();
       const absoluteExpiresAt = new Date(Date.now() + deps.ttlAbsolutoMs);
-      return persistirNovo(userId, familyId, absoluteExpiresAt);
+      const token = await persistirNovo(userId, familyId, absoluteExpiresAt);
+      try {
+        await deps.aoAbrirSessao?.({
+          sessionId: familyId,
+          userId,
+          ip: contexto.ip,
+          userAgent: contexto.userAgent,
+          expiraEm: absoluteExpiresAt,
+        });
+      } catch {
+        /* abertura de metadado é best-effort; a autenticação não depende dela */
+      }
+      return { token, sessionId: familyId };
     },
 
     async revogar(refreshToken: string): Promise<void> {
@@ -77,7 +135,11 @@ export function criarRefreshTokenService(
       // no-op idempotente.
       const doc = await deps.repo.buscarPorHash(digerirToken(refreshToken));
       if (doc === null) return;
-      await deps.repo.revogarFamilia(doc.familyId);
+      await encerrarFamilia(doc.familyId, 'logout');
+    },
+
+    async revogarFamilia(familyId: string, motivo: MotivoDeRevogacaoDeFamilia): Promise<void> {
+      await encerrarFamilia(familyId, motivo);
     },
 
     async rotacionar(refreshToken: string): Promise<ParDeTokens> {
@@ -107,7 +169,7 @@ export function criarRefreshTokenService(
         if (rotacionadoHaPouco) {
           throw new ErroDeRefreshInvalido('corrida');
         }
-        await deps.repo.revogarFamilia(doc.familyId);
+        await encerrarFamilia(doc.familyId, 'reuso');
         medidor.contarReuso();
         throw new ErroDeRefreshInvalido('reuso');
       }
@@ -135,14 +197,25 @@ export function criarRefreshTokenService(
       // Reavalia o usuário: bloqueio ou mudança de papel desde o login refletem agora.
       const usuario = await deps.usuarios.buscarPorId(doc.userId);
       if (usuario === null || usuario.status !== 'active') {
-        await deps.repo.revogarFamilia(doc.familyId);
+        await encerrarFamilia(doc.familyId, 'bloqueio');
         medidor.contarFalha('usuario_bloqueado');
         throw new ErroDeRefreshInvalido('usuario_bloqueado');
       }
 
       const roles = await deps.usuarios.papeisDoUsuario(doc.userId);
-      const emitido = await deps.tokenService.emitir({ sub: doc.userId, roles, scope });
+      const emitido = await deps.tokenService.emitir({
+        sub: doc.userId,
+        roles,
+        scope,
+        sid: doc.familyId,
+      });
       const novoRefresh = await persistirNovo(doc.userId, doc.familyId, doc.absoluteExpiresAt);
+
+      try {
+        await deps.aoTocarSessao?.(doc.familyId);
+      } catch {
+        /* atualizar "visto por último" é best-effort */
+      }
 
       medidor.contarRotacao();
       medidor.observarDuracao((Date.now() - inicio) / 1000);

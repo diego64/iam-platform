@@ -62,4 +62,21 @@ describe('TokenService.emitir', () => {
     const b = await service.emitir({ sub: 'u', roles: [], scope: '' });
     expect(a.jti).not.toBe(b.jti);
   });
+
+  it('inclui o sid nos claims quando informado, e omite quando ausente', async () => {
+    const { service, publicJwk } = await montar();
+    const publica = await importJWK(publicJwk, 'EdDSA');
+    const verificar = (token: string): ReturnType<typeof jwtVerify> =>
+      jwtVerify(token, publica, {
+        algorithms: ['EdDSA'],
+        issuer: CONFIG.emissor,
+        audience: CONFIG.audiencia,
+      });
+
+    const comSid = await service.emitir({ sub: 'u', roles: [], scope: '', sid: 'sess-42' });
+    expect((await verificar(comSid.token)).payload.sid).toBe('sess-42');
+
+    const semSid = await service.emitir({ sub: 'u', roles: [], scope: '' });
+    expect((await verificar(semSid.token)).payload.sid).toBeUndefined();
+  });
 });

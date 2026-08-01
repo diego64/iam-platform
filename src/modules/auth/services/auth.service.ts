@@ -14,7 +14,7 @@ import type { ParDeTokens } from '../types/auth.types.js';
 import type { ServicoDeSenha } from '../../../shared/crypto/password.service.js';
 import type { RepositorioDeAutenticacao } from '../repositories/auth-user.repository.js';
 import type { RepositorioDeDenylist } from '../repositories/token-denylist.repository.js';
-import type { PortaDeRefreshToken } from '../interfaces/refresh-token.port.js';
+import type { ContextoDeSessao, PortaDeRefreshToken } from '../interfaces/refresh-token.port.js';
 import type { TokenService } from './token.service.js';
 import { medidorDeAuthNulo, type MedidorDeAuth } from '../metrics/auth.metrics.js';
 
@@ -49,7 +49,7 @@ export interface DependenciasDoAuthService {
 }
 
 export interface AuthService {
-  login(credenciais: Credenciais): Promise<ParDeTokens>;
+  login(credenciais: Credenciais, contexto: ContextoDeSessao): Promise<ParDeTokens>;
   logout(dados: DadosDeLogout): Promise<void>;
   perfil(userId: string): Promise<PerfilDoUsuario | null>;
 }
@@ -59,7 +59,7 @@ export function criarAuthService(deps: DependenciasDoAuthService): AuthService {
   const scope = deps.scopePadrao ?? '';
 
   return {
-    async login(credenciais: Credenciais): Promise<ParDeTokens> {
+    async login(credenciais: Credenciais, contexto: ContextoDeSessao): Promise<ParDeTokens> {
       const usuario = await deps.repo.buscarPorEmail(credenciais.email);
 
       if (usuario === null) {
@@ -87,8 +87,18 @@ export function criarAuthService(deps: DependenciasDoAuthService): AuthService {
       }
 
       const roles = await deps.repo.papeisDoUsuario(usuario.id);
-      const emitido = await deps.tokenService.emitir({ sub: usuario.id, roles, scope });
-      const refreshToken = await deps.refreshToken.emitir(usuario.id);
+      // Emite o refresh primeiro: ele abre a sessão e devolve o id que vai como `sid` no
+      // access token, para o dono conseguir reconhecer e encerrar esta sessão depois.
+      const { token: refreshToken, sessionId } = await deps.refreshToken.emitir(
+        usuario.id,
+        contexto,
+      );
+      const emitido = await deps.tokenService.emitir({
+        sub: usuario.id,
+        roles,
+        scope,
+        sid: sessionId,
+      });
 
       medidor.contarSucesso();
       return {

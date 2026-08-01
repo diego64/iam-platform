@@ -7,13 +7,18 @@ import { describe, expect, it, vi, type Mock } from 'vitest';
 import {
   criarRefreshTokenService,
   type RefreshTokenService,
+  type DadosDeAberturaDeSessao,
+  type MotivoDeRevogacaoDeFamilia,
 } from '../../../../src/modules/refresh-token/services/refresh-token.service.js';
 import { ErroDeRefreshInvalido } from '../../../../src/modules/refresh-token/errors/refresh-token-error.js';
 import type {
   EntradaDeRegistro,
   RefreshPersistido,
 } from '../../../../src/modules/refresh-token/repositories/refresh-token.repository.js';
-import type { TokenEmitido } from '../../../../src/modules/auth/services/token.service.js';
+import type {
+  DadosParaToken,
+  TokenEmitido,
+} from '../../../../src/modules/auth/services/token.service.js';
 import type { StatusDeUsuario } from '../../../../src/modules/users/entities/user.entity.js';
 
 type UsuarioLido = { id: string; email: string; status: StatusDeUsuario } | null;
@@ -25,7 +30,10 @@ interface Fakes {
   rotacionarAtomico: Mock<(hash: string, agora: Date) => Promise<RefreshPersistido | null>>;
   revogarFamilia: Mock<(familyId: string) => Promise<void>>;
   buscarPorId: Mock<(id: string) => Promise<UsuarioLido>>;
-  emitir: Mock<() => Promise<TokenEmitido>>;
+  emitir: Mock<(dados: DadosParaToken) => Promise<TokenEmitido>>;
+  aoAbrirSessao: Mock<(dados: DadosDeAberturaDeSessao) => Promise<void>>;
+  aoTocarSessao: Mock<(sessionId: string) => Promise<void>>;
+  aoRevogarFamilia: Mock<(sessionId: string, motivo: MotivoDeRevogacaoDeFamilia) => Promise<void>>;
   medidor: {
     contarRotacao: Mock;
     contarReuso: Mock;
@@ -60,9 +68,16 @@ function montar(): Fakes {
     Promise.resolve({ id: 'u1', email: 'a@iam.local', status: 'active' }),
   );
   const papeisDoUsuario = vi.fn(() => Promise.resolve(['admin']));
-  const emitir = vi.fn<() => Promise<TokenEmitido>>(() =>
+  const emitir = vi.fn<(dados: DadosParaToken) => Promise<TokenEmitido>>(() =>
     Promise.resolve({ token: 'jwt-novo', jti: 'j2', expiraEm: new Date(), ttlSegundos: 900 }),
   );
+  const aoAbrirSessao = vi.fn<(dados: DadosDeAberturaDeSessao) => Promise<void>>(() =>
+    Promise.resolve(),
+  );
+  const aoTocarSessao = vi.fn<(sessionId: string) => Promise<void>>(() => Promise.resolve());
+  const aoRevogarFamilia = vi.fn<
+    (sessionId: string, motivo: MotivoDeRevogacaoDeFamilia) => Promise<void>
+  >(() => Promise.resolve());
   const medidor = {
     contarRotacao: vi.fn(),
     contarReuso: vi.fn(),
@@ -78,6 +93,9 @@ function montar(): Fakes {
     ttlAbsolutoMs: 3_600_000,
     graceMs: 10_000,
     medidor,
+    aoAbrirSessao,
+    aoTocarSessao,
+    aoRevogarFamilia,
   });
 
   return {
@@ -88,23 +106,36 @@ function montar(): Fakes {
     revogarFamilia,
     buscarPorId,
     emitir,
+    aoAbrirSessao,
+    aoTocarSessao,
+    aoRevogarFamilia,
     medidor,
   };
 }
 
+const CTX = { ip: '203.0.113.9', userAgent: 'vitest' };
+
 describe('emitir', () => {
-  it('persiste um token novo e o devolve com 88 caracteres', async () => {
-    const { service, registrar } = montar();
-    const token = await service.emitir('u1');
+  it('persiste um token novo, abre a sessão e devolve token de 88 chars + sessionId', async () => {
+    const { service, registrar, aoAbrirSessao } = montar();
+    const { token, sessionId } = await service.emitir('u1', CTX);
+
     expect(token).toHaveLength(88);
+    expect(sessionId).toMatch(/^[0-9a-f-]{36}$/);
     expect(registrar).toHaveBeenCalledOnce();
-    expect(registrar.mock.calls[0]?.[0]).toMatchObject({ userId: 'u1' });
+    expect(registrar.mock.calls[0]?.[0]).toMatchObject({ userId: 'u1', familyId: sessionId });
+    expect(aoAbrirSessao.mock.calls[0]?.[0]).toMatchObject({
+      sessionId,
+      userId: 'u1',
+      ip: '203.0.113.9',
+      userAgent: 'vitest',
+    });
   });
 });
 
 describe('rotacionar', () => {
-  it('rotaciona e emite um novo par no caminho feliz', async () => {
-    const { service, rotacionarAtomico, registrar, medidor } = montar();
+  it('rotaciona, toca a sessão e reemite o access com o sid da família', async () => {
+    const { service, rotacionarAtomico, registrar, emitir, aoTocarSessao, medidor } = montar();
     const par = await service.rotacionar('token-atual');
 
     expect(par.accessToken).toBe('jwt-novo');
@@ -112,6 +143,8 @@ describe('rotacionar', () => {
     expect(par.refreshToken).toHaveLength(88);
     expect(rotacionarAtomico).toHaveBeenCalledOnce();
     expect(registrar).toHaveBeenCalledOnce(); // o sucessor
+    expect(emitir.mock.calls[0]?.[0]).toMatchObject({ sub: 'u1', sid: 'fam-1' });
+    expect(aoTocarSessao).toHaveBeenCalledWith('fam-1');
     expect(medidor.contarRotacao).toHaveBeenCalledOnce();
   });
 
@@ -124,13 +157,14 @@ describe('rotacionar', () => {
   });
 
   it('reuso pós-graça derruba a família', async () => {
-    const { service, buscarPorHash, revogarFamilia, medidor } = montar();
+    const { service, buscarPorHash, revogarFamilia, aoRevogarFamilia, medidor } = montar();
     buscarPorHash.mockResolvedValueOnce(
       docAtivo({ status: 'rotated', rotatedAt: new Date(Date.now() - 20_000) }),
     );
 
     await expect(service.rotacionar('antigo')).rejects.toMatchObject({ motivo: 'reuso' });
     expect(revogarFamilia).toHaveBeenCalledWith('fam-1');
+    expect(aoRevogarFamilia).toHaveBeenCalledWith('fam-1', 'reuso');
     expect(medidor.contarReuso).toHaveBeenCalledOnce();
   });
 
@@ -188,10 +222,11 @@ describe('rotacionar', () => {
 });
 
 describe('revogar', () => {
-  it('derruba a família do token apresentado', async () => {
-    const { service, revogarFamilia } = montar();
+  it('derruba a família do token apresentado e reflete na sessão (logout)', async () => {
+    const { service, revogarFamilia, aoRevogarFamilia } = montar();
     await service.revogar('tok');
     expect(revogarFamilia).toHaveBeenCalledWith('fam-1');
+    expect(aoRevogarFamilia).toHaveBeenCalledWith('fam-1', 'logout');
   });
 
   it('token desconhecido é no-op', async () => {
@@ -199,5 +234,21 @@ describe('revogar', () => {
     buscarPorHash.mockResolvedValueOnce(null);
     await service.revogar('desconhecido');
     expect(revogarFamilia).not.toHaveBeenCalled();
+  });
+});
+
+describe('revogarFamilia', () => {
+  it('encerra a família e reflete o motivo na sessão', async () => {
+    const { service, revogarFamilia, aoRevogarFamilia } = montar();
+    await service.revogarFamilia('fam-9', 'sessao_unica');
+    expect(revogarFamilia).toHaveBeenCalledWith('fam-9');
+    expect(aoRevogarFamilia).toHaveBeenCalledWith('fam-9', 'sessao_unica');
+  });
+
+  it('não deixa o reflexo na sessão derrubar a revogação dos tokens', async () => {
+    const { service, revogarFamilia, aoRevogarFamilia } = montar();
+    aoRevogarFamilia.mockRejectedValueOnce(new Error('sessão indisponível'));
+    await expect(service.revogarFamilia('fam-9', 'logout')).resolves.toBeUndefined();
+    expect(revogarFamilia).toHaveBeenCalledWith('fam-9');
   });
 });

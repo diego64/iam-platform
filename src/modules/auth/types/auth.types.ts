@@ -17,6 +17,8 @@ export interface UsuarioAutenticado {
   readonly id: string;
   readonly roles: string[];
   readonly scope: string;
+  /** Sessão corrente (claim `sid`); ausente em tokens emitidos sem sessão. */
+  readonly sid?: string;
 }
 
 /** Par de tokens emitido no login. O refresh é opaco (o concreto vem do token persistente). */

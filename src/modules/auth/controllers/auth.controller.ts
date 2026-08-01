@@ -36,8 +36,12 @@ export function criarControllerDeAuth(deps: DependenciasDoControllerDeAuth): Con
   return {
     async login(requisicao: FastifyRequest, resposta: FastifyReply): Promise<void> {
       const { email, senha } = requisicao.body as LoginBody;
+      const contexto = {
+        ip: requisicao.ip,
+        userAgent: requisicao.headers['user-agent'] ?? null,
+      };
       try {
-        const par = await deps.authService.login({ email, senha });
+        const par = await deps.authService.login({ email, senha }, contexto);
         await resposta.status(200).send({
           access_token: par.accessToken,
           refresh_token: par.refreshToken,
