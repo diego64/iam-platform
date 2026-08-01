@@ -71,6 +71,7 @@ export function criarVerificadorDeAccessToken(
     let jti: unknown;
     let exp: unknown;
     let roles: unknown;
+    let perm: unknown;
     let scope: unknown;
     try {
       const conjunto = await deps.jwks.obterConjuntoDeVerificacao();
@@ -79,7 +80,7 @@ export function criarVerificadorDeAccessToken(
         issuer: deps.emissor,
         audience: deps.audiencia,
       });
-      ({ sub, jti, exp, roles, scope } = payload);
+      ({ sub, jti, exp, roles, perm, scope } = payload);
     } catch {
       await recusar(resposta, 'invalid-token');
       return;
@@ -104,6 +105,9 @@ export function criarVerificadorDeAccessToken(
     requisicao.usuario = {
       id: sub,
       roles: Array.isArray(roles) ? roles.filter((r): r is string => typeof r === 'string') : [],
+      permissions: Array.isArray(perm)
+        ? perm.filter((p): p is string => typeof p === 'string')
+        : [],
       scope: typeof scope === 'string' ? scope : '',
     };
     requisicao.tokenAtual = { jti, exp };

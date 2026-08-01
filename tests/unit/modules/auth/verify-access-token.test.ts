@@ -87,8 +87,26 @@ describe('verificarAccessToken', () => {
     expect(res.json<{ usuario: unknown }>().usuario).toEqual({
       id: 'user-1',
       roles: ['admin'],
+      permissions: [],
       scope: 'leitura',
     });
+  });
+
+  it('popula permissions a partir da claim perm', async () => {
+    const token = await assinar({
+      sub: 'user-1',
+      jti: 'j1',
+      scope: '',
+      roles: [],
+      perm: ['users:read', 'users:delete'],
+    });
+    const res = await pedir(token);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json<{ usuario: { permissions: string[] } }>().usuario.permissions).toEqual([
+      'users:read',
+      'users:delete',
+    ]);
   });
 
   it('rejeita ausência de Authorization', async () => {
