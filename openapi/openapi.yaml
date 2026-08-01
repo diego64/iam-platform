@@ -116,6 +116,30 @@ components:
           enum: [Bearer]
         expires_in:
           type: integer
+    SessionsResponse:
+      type: object
+      additionalProperties: false
+      required: [sessions]
+      properties:
+        sessions:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, current, ip, user_agent, created_at, last_seen_at]
+            properties:
+              id: { type: string, format: uuid }
+              current: { type: boolean }
+              ip: { type: string, nullable: true }
+              user_agent: { type: string, nullable: true }
+              created_at: { type: string, format: date-time }
+              last_seen_at: { type: string, format: date-time }
+    RevokeOthersResponse:
+      type: object
+      additionalProperties: false
+      required: [revogadas]
+      properties:
+        revogadas: { type: integer, minimum: 0 }
     MeResponse:
       type: object
       additionalProperties: false
@@ -804,6 +828,83 @@ paths:
                 $ref: '#/components/schemas/MeResponse'
         '401':
           description: Token ausente, inválido ou revogado
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /auth/sessions:
+    get:
+      tags: [auth]
+      summary: Lista as sessões ativas do usuário, marcando a atual
+      description: >
+        Devolve apenas as sessões do próprio usuário autenticado, ordenadas por atividade
+        recente. A sessão do token corrente vem com `current: true`.
+      operationId: listSessions
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: Sessões ativas do usuário
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionsResponse'
+        '401':
+          description: Token ausente, inválido ou revogado
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+    delete:
+      tags: [auth]
+      summary: Encerra todas as outras sessões, preservando a atual
+      description: >
+        Encerra todas as sessões do usuário menos a do token corrente ("sair dos demais
+        dispositivos") e devolve quantas foram encerradas.
+      operationId: revokeOtherSessions
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: Quantidade de sessões encerradas
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevokeOthersResponse'
+        '401':
+          description: Token ausente, inválido ou revogado
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /auth/sessions/{id}:
+    delete:
+      tags: [auth]
+      summary: Encerra uma sessão do próprio usuário
+      description: >
+        Sessão inexistente ou de outro usuário responde o mesmo 404, sem revelar existência.
+      operationId: revokeSession
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204':
+          description: Sessão encerrada
+        '400':
+          description: Id inválido
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          description: Token ausente, inválido ou revogado
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '404':
+          description: Sessão não encontrada
           content:
             application/problem+json:
               schema:
