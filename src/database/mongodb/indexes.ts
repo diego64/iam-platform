@@ -8,6 +8,7 @@ export async function garantirIndices(banco: Db): Promise<void> {
   await banco.collection('refresh_tokens').createIndexes([
     { key: { token_hash: 1 }, unique: true },
     { key: { user_id: 1 } },
+    { key: { family_id: 1 } }, // revogação de família (logout, reuso, bloqueio) em O(família)
     { key: { expires_at: 1 }, expireAfterSeconds: 0 }, // TTL: expira sozinho
   ]);
   await banco.collection('token_denylist').createIndexes([

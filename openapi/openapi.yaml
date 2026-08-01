@@ -93,6 +93,29 @@ components:
           type: string
           minLength: 88
           maxLength: 88
+    RefreshRequest:
+      type: object
+      additionalProperties: false
+      required: [refresh_token]
+      properties:
+        refresh_token:
+          type: string
+          minLength: 88
+          maxLength: 88
+    RefreshResponse:
+      type: object
+      additionalProperties: false
+      required: [access_token, refresh_token, token_type, expires_in]
+      properties:
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        token_type:
+          type: string
+          enum: [Bearer]
+        expires_in:
+          type: integer
     MeResponse:
       type: object
       additionalProperties: false
@@ -687,6 +710,48 @@ paths:
                 $ref: '#/components/schemas/Problem'
         '401':
           description: Credenciais inválidas
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '429':
+          description: Rate limit excedido
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /auth/refresh:
+    post:
+      tags: [auth]
+      summary: Rotaciona o refresh token e emite um novo par
+      description: >
+        Troca um refresh token válido por um novo par (access + refresh) e invalida o token
+        apresentado. Reapresentar um token já rotacionado derruba a sessão inteira. Falha
+        responde 401 com mensagem única e genérica. Rate limit por IP; excedido, 429 com
+        Retry-After.
+      operationId: authRefresh
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: Novo par de tokens emitido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshResponse'
+        '400':
+          description: Requisição inválida
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          description: Refresh token inválido
           content:
             application/problem+json:
               schema:
