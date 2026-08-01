@@ -34,7 +34,7 @@
     "test:e2e": "pnpm docker:build:test && node --env-file-if-exists=infra/compose/.env ./node_modules/vitest/vitest.mjs run --dir tests/e2e",
     "test:coverage": "vitest run --coverage --no-file-parallelism",
     "test:load": "k6 run tests/performance/k6/login-flood.js",
-    "migrate": "tsx scripts/migrate.ts",
+    "migrate": "tsx src/database/migrate.ts",
     "seed": "tsx scripts/seed.ts",
     "openapi:validate": "spectral lint openapi/openapi.yaml",
     "infra:up": "docker compose -f infra/compose/docker-compose.yml up -d",

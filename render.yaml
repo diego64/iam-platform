@@ -20,7 +20,9 @@ services:
 
     # Roda uma vez, antes de trocar o tráfego. No entrypoint do container, N
     # réplicas subindo em paralelo executariam a migração N vezes.
-    preDeployCommand: pnpm migrate
+    # `node dist/...`, não `pnpm migrate`: o runtime image não tem pnpm/tsx/src — só
+    # dist + node_modules de produção. O runner compilado lê os .sql copiados no build.
+    preDeployCommand: node dist/database/migrate.js
 
     # Promoção é do pipeline, não do push. Deploy automático em push tira do
     # gate de qualidade o poder de barrar uma versão.
