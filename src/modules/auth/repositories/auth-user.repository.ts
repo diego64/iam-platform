@@ -17,8 +17,16 @@ export interface UsuarioParaLogin {
   readonly passwordHash: string;
 }
 
+/** Perfil do usuário para `/auth/me` — sem hash. */
+export interface UsuarioParaPerfil {
+  readonly id: string;
+  readonly email: string;
+  readonly status: StatusDeUsuario;
+}
+
 export interface RepositorioDeAutenticacao {
   buscarPorEmail(email: string): Promise<UsuarioParaLogin | null>;
+  buscarPorId(id: string): Promise<UsuarioParaPerfil | null>;
   papeisDoUsuario(userId: string): Promise<string[]>;
 }
 
@@ -45,6 +53,17 @@ export function criarRepositorioDeAutenticacao(pool: Pool): RepositorioDeAutenti
             status: linha.status,
             passwordHash: linha.password_hash,
           };
+    },
+
+    async buscarPorId(id: string): Promise<UsuarioParaPerfil | null> {
+      const { rows } = await pool.query<{ id: string; email: string; status: StatusDeUsuario }>(
+        'SELECT id, email, status FROM users WHERE id = $1',
+        [id],
+      );
+      const linha = rows[0];
+      return linha === undefined
+        ? null
+        : { id: linha.id, email: linha.email, status: linha.status };
     },
 
     async papeisDoUsuario(userId: string): Promise<string[]> {

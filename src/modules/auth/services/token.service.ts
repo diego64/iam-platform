@@ -27,6 +27,7 @@ export interface TokenEmitido {
   readonly token: string;
   readonly jti: string;
   readonly expiraEm: Date;
+  readonly ttlSegundos: number;
 }
 
 export interface TokenService {
@@ -54,7 +55,7 @@ export function criarTokenService(
         .setAudience(config.audiencia)
         .sign(privateKey.usar());
 
-      return { token, jti, expiraEm: new Date(exp * 1000) };
+      return { token, jti, expiraEm: new Date(exp * 1000), ttlSegundos: config.ttlSegundos };
     },
   };
 }

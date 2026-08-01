@@ -20,6 +20,8 @@ import type { RepositorioDeDenylist } from '../repositories/token-denylist.repos
 declare module 'fastify' {
   interface FastifyRequest {
     usuario?: UsuarioAutenticado;
+    /** Claims do token corrente necessários ao logout (revogar o `jti` até o `exp`). */
+    tokenAtual?: { readonly jti: string; readonly exp: number };
   }
 }
 
@@ -67,6 +69,7 @@ export function criarVerificadorDeAccessToken(
 
     let sub: unknown;
     let jti: unknown;
+    let exp: unknown;
     let roles: unknown;
     let scope: unknown;
     try {
@@ -76,13 +79,13 @@ export function criarVerificadorDeAccessToken(
         issuer: deps.emissor,
         audience: deps.audiencia,
       });
-      ({ sub, jti, roles, scope } = payload);
+      ({ sub, jti, exp, roles, scope } = payload);
     } catch {
       await recusar(resposta, 'invalid-token');
       return;
     }
 
-    if (typeof jti !== 'string' || typeof sub !== 'string') {
+    if (typeof jti !== 'string' || typeof sub !== 'string' || typeof exp !== 'number') {
       await recusar(resposta, 'invalid-token');
       return;
     }
@@ -103,6 +106,7 @@ export function criarVerificadorDeAccessToken(
       roles: Array.isArray(roles) ? roles.filter((r): r is string => typeof r === 'string') : [],
       scope: typeof scope === 'string' ? scope : '',
     };
+    requisicao.tokenAtual = { jti, exp };
   };
 }
 
