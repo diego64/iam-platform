@@ -17,11 +17,44 @@ tags:
     description: Administração de usuários (CRUD e ciclo de status). Restrito a administradores.
   - name: observability
     description: Exposição de métricas para raspagem pelo Prometheus.
+  - name: jwks
+    description: Publicação das chaves públicas de verificação (JWK Set).
 servers:
   - url: http://localhost:3000
     description: Desenvolvimento local
 components:
   schemas:
+    Jwk:
+      type: object
+      additionalProperties: false
+      required: [kty, crv, x, kid, use, alg]
+      properties:
+        kty:
+          type: string
+          enum: [OKP]
+        crv:
+          type: string
+          enum: [Ed25519]
+        x:
+          type: string
+          description: Chave pública Ed25519 em base64url.
+        kid:
+          type: string
+        use:
+          type: string
+          enum: [sig]
+        alg:
+          type: string
+          enum: [EdDSA]
+    JwksResponse:
+      type: object
+      additionalProperties: false
+      required: [keys]
+      properties:
+        keys:
+          type: array
+          items:
+            $ref: '#/components/schemas/Jwk'
     Dependencia:
       type: object
       additionalProperties: false
@@ -538,3 +571,34 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+  /.well-known/jwks.json:
+    get:
+      tags: [jwks]
+      summary: Conjunto de chaves públicas de verificação (JWK Set)
+      description: >
+        Publica as chaves públicas Ed25519 (active, next e retired ainda dentro da janela de
+        graça) no formato JWK Set. Consumido pelos microsserviços para validar os tokens
+        offline. Nunca expõe material privado.
+      operationId: jwks
+      security: []
+      responses:
+        '200':
+          description: Conjunto de chaves públicas
+          headers:
+            Cache-Control:
+              description: Resposta cacheável por 5 minutos.
+              schema:
+                type: string
+                example: public, max-age=300
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JwksResponse'
+              example:
+                keys:
+                  - kty: OKP
+                    crv: Ed25519
+                    x: 11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo
+                    kid: 0193b6e2-7f00-7cd1-9a3e-2b7c9f0a1d42
+                    use: sig
+                    alg: EdDSA
