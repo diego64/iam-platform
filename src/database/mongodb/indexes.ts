@@ -15,6 +15,13 @@ export async function garantirIndices(banco: Db): Promise<void> {
     { key: { jti: 1 }, unique: true },
     { key: { expires_at: 1 }, expireAfterSeconds: 0 }, // TTL
   ]);
+  // Metadados de sessão (uma por família de refresh). Listadas pelo próprio dono e apagadas
+  // sozinhas ao fim do teto absoluto da família.
+  await banco.collection('active_sessions').createIndexes([
+    { key: { session_id: 1 }, unique: true },
+    { key: { user_id: 1, status: 1 } }, // listar as ativas de um usuário
+    { key: { expires_at: 1 }, expireAfterSeconds: 0 }, // TTL
+  ]);
   // Tokens de reset de senha. Só o sha256 é indexado/único; o token em claro
   // nunca toca o banco. TTL apaga o registro ao expirar; o índice por user_id serve para
   // invalidar todos os tokens de um usuário quando ele troca a senha.

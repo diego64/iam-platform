@@ -91,6 +91,14 @@ describe('verificarAccessToken', () => {
     });
   });
 
+  it('expõe o sid quando presente no token', async () => {
+    const token = await assinar({ sub: 'user-1', jti: 'j1', scope: '', roles: [], sid: 'sess-7' });
+    const res = await pedir(token);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json<{ usuario: { sid?: string } }>().usuario.sid).toBe('sess-7');
+  });
+
   it('rejeita ausência de Authorization', async () => {
     const res = await pedir();
     expect(res.statusCode).toBe(401);

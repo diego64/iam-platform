@@ -38,6 +38,12 @@ import {
   criarRepositorioDeRefreshToken,
   type RefreshTokenService,
 } from '../../../src/modules/refresh-token/index.js';
+import {
+  registrarRotasDeSessoes,
+  criarSessionService,
+  criarRepositorioDeSessoes,
+  type SessionService,
+} from '../../../src/modules/sessions/index.js';
 
 const TIPO_PROBLEM_JSON = 'application/problem+json';
 const EMISSOR = 'https://iam.example.com';
@@ -53,6 +59,7 @@ export interface AppDeAuth {
   readonly app: FastifyInstance;
   readonly servicoDeSenha: ServicoDeSenha;
   readonly refreshTokenService: RefreshTokenService;
+  readonly sessionService: SessionService;
 }
 
 export async function montarAppDeAuth(opcoes: { pool: Pool; banco: Db }): Promise<AppDeAuth> {
@@ -104,7 +111,18 @@ export async function montarAppDeAuth(opcoes: { pool: Pool; banco: Db }): Promis
     ttlSegundos: 900,
   });
 
-  // Refresh token persistente real no lugar do stub em memória.
+  // Sessões e refresh dependem um do outro (o refresh dispara os ganchos da sessão; a sessão
+  // manda o refresh encerrar famílias). Um porta-referência quebra o ciclo de construção.
+  const refBox: { atual?: RefreshTokenService } = {};
+  const sessionService = criarSessionService({
+    repo: criarRepositorioDeSessoes(opcoes.banco),
+    revogarFamilia: (id, motivo) => {
+      if (refBox.atual === undefined) throw new Error('refresh não inicializado');
+      return refBox.atual.revogarFamilia(id, motivo);
+    },
+  });
+
+  // Refresh token persistente real no lugar do stub em memória, com os ganchos de sessão.
   const refreshTokenService = criarRefreshTokenService({
     repo: criarRepositorioDeRefreshToken(opcoes.banco),
     usuarios: repoAuth,
@@ -112,7 +130,11 @@ export async function montarAppDeAuth(opcoes: { pool: Pool; banco: Db }): Promis
     ttlIdleMs: REFRESH_TTL_IDLE_MS,
     ttlAbsolutoMs: REFRESH_TTL_ABSOLUTO_MS,
     graceMs: REFRESH_GRACE_MS,
+    aoAbrirSessao: (dados) => sessionService.aoAbrirSessao(dados),
+    aoTocarSessao: (sessionId) => sessionService.aoTocarSessao(sessionId),
+    aoRevogarFamilia: (sessionId, motivo) => sessionService.aoRevogarFamilia(sessionId, motivo),
   });
+  refBox.atual = refreshTokenService;
 
   const authService = criarAuthService({
     repo: repoAuth,
@@ -130,6 +152,7 @@ export async function montarAppDeAuth(opcoes: { pool: Pool; banco: Db }): Promis
 
   registrarRotasDeAuth(app, { authService, verificarAccessToken });
   registrarRotasDeRefresh(app, { refreshTokenService });
+  registrarRotasDeSessoes(app, { sessionService, verificarAccessToken });
   await app.ready();
-  return { app, servicoDeSenha, refreshTokenService };
+  return { app, servicoDeSenha, refreshTokenService, sessionService };
 }

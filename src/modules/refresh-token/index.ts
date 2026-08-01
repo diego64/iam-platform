@@ -6,6 +6,8 @@ export {
   criarRefreshTokenService,
   type RefreshTokenService,
   type DependenciasDoRefreshTokenService,
+  type DadosDeAberturaDeSessao,
+  type MotivoDeRevogacaoDeFamilia,
 } from './services/refresh-token.service.js';
 export {
   criarRepositorioDeRefreshToken,

@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { createPrivateKey } from 'node:crypto';
-import { importJWK, jwtVerify, decodeProtectedHeader } from 'jose';
+import { importJWK, jwtVerify, decodeProtectedHeader, type JWTVerifyResult } from 'jose';
 import { criarTokenService } from '../../../../src/modules/auth/services/token.service.js';
 import { gerarParEd25519 } from '../../../../src/modules/jwks/services/key-factory.js';
 import { ChavePrivada } from '../../../../src/shared/crypto/private-key.js';
@@ -61,5 +61,22 @@ describe('TokenService.emitir', () => {
     const a = await service.emitir({ sub: 'u', roles: [], scope: '' });
     const b = await service.emitir({ sub: 'u', roles: [], scope: '' });
     expect(a.jti).not.toBe(b.jti);
+  });
+
+  it('inclui o sid nos claims quando informado, e omite quando ausente', async () => {
+    const { service, publicJwk } = await montar();
+    const publica = await importJWK(publicJwk, 'EdDSA');
+    const verificar = (token: string): Promise<JWTVerifyResult> =>
+      jwtVerify(token, publica, {
+        algorithms: ['EdDSA'],
+        issuer: CONFIG.emissor,
+        audience: CONFIG.audiencia,
+      });
+
+    const comSid = await service.emitir({ sub: 'u', roles: [], scope: '', sid: 'sess-42' });
+    expect((await verificar(comSid.token)).payload.sid).toBe('sess-42');
+
+    const semSid = await service.emitir({ sub: 'u', roles: [], scope: '' });
+    expect((await verificar(semSid.token)).payload.sid).toBeUndefined();
   });
 });
