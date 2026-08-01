@@ -19,6 +19,8 @@ tags:
     description: Exposição de métricas para raspagem pelo Prometheus.
   - name: jwks
     description: Publicação das chaves públicas de verificação (JWK Set).
+  - name: auth
+    description: Login, logout e perfil do usuário autenticado.
 servers:
   - url: http://localhost:3000
     description: Desenvolvimento local
@@ -55,6 +57,82 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Jwk'
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, senha]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        senha:
+          type: string
+          minLength: 8
+          maxLength: 128
+    LoginResponse:
+      type: object
+      additionalProperties: false
+      required: [access_token, refresh_token, token_type, expires_in]
+      properties:
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        token_type:
+          type: string
+          enum: [Bearer]
+        expires_in:
+          type: integer
+    LogoutRequest:
+      type: object
+      additionalProperties: false
+      required: [refresh_token]
+      properties:
+        refresh_token:
+          type: string
+          minLength: 88
+          maxLength: 88
+    RefreshRequest:
+      type: object
+      additionalProperties: false
+      required: [refresh_token]
+      properties:
+        refresh_token:
+          type: string
+          minLength: 88
+          maxLength: 88
+    RefreshResponse:
+      type: object
+      additionalProperties: false
+      required: [access_token, refresh_token, token_type, expires_in]
+      properties:
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        token_type:
+          type: string
+          enum: [Bearer]
+        expires_in:
+          type: integer
+    MeResponse:
+      type: object
+      additionalProperties: false
+      required: [id, email, status, roles]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        status:
+          type: string
+        roles:
+          type: array
+          items:
+            type: string
     Dependencia:
       type: object
       additionalProperties: false
@@ -602,3 +680,131 @@ paths:
                     kid: 0193b6e2-7f00-7cd1-9a3e-2b7c9f0a1d42
                     use: sig
                     alg: EdDSA
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Autentica e-mail + senha e emite os tokens
+      description: >
+        Falha de credencial responde 401 com mensagem única e genérica, sem distinguir
+        usuário inexistente de senha errada. Rate limit por IP; excedido, 429 com Retry-After.
+      operationId: authLogin
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Tokens emitidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          description: Requisição inválida
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          description: Credenciais inválidas
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '429':
+          description: Rate limit excedido
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /auth/refresh:
+    post:
+      tags: [auth]
+      summary: Rotaciona o refresh token e emite um novo par
+      description: >
+        Troca um refresh token válido por um novo par (access + refresh) e invalida o token
+        apresentado. Reapresentar um token já rotacionado derruba a sessão inteira. Falha
+        responde 401 com mensagem única e genérica. Rate limit por IP; excedido, 429 com
+        Retry-After.
+      operationId: authRefresh
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: Novo par de tokens emitido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshResponse'
+        '400':
+          description: Requisição inválida
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          description: Refresh token inválido
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '429':
+          description: Rate limit excedido
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Revoga o par de tokens (denylist + refresh)
+      description: >
+        Coloca o jti do access token na denylist (com TTL igual ao exp) e revoga o refresh
+        token. Uma requisição subsequente com o mesmo access token responde 401.
+      operationId: authLogout
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LogoutRequest'
+      responses:
+        '204':
+          description: Sessão encerrada
+        '401':
+          description: Token ausente, inválido ou revogado
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /auth/me:
+    get:
+      tags: [auth]
+      summary: Perfil do usuário autenticado
+      description: >
+        Devolve o perfil do usuário resolvido a partir do access token (id, e-mail, status e
+        papéis). Nunca inclui o hash de senha.
+      operationId: authMe
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: Perfil do usuário
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeResponse'
+        '401':
+          description: Token ausente, inválido ou revogado
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'

@@ -124,6 +124,49 @@ export const esquemaEnv = z.object({
     .max(60 * 60 * 1000)
     .default(5 * 60 * 1000),
 
+  // Emissão de token de acesso: emissor, audiência e TTL do access token (segundos).
+  // O TTL casa com a janela de graça do JWKS — nenhum token válido fica sem chave.
+  JWT_ISSUER: z.string().url().default('https://iam.example.com'),
+  JWT_AUDIENCE: z.string().min(1).default('iam-clients'),
+  ACCESS_TOKEN_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .min(60)
+    .max(60 * 60)
+    .default(15 * 60),
+
+  // Refresh token opaco. Validade deslizante por token (idle), renovada a cada
+  // rotação, e teto absoluto por família que a rotação nunca estende. `grace` é a janela em
+  // que uma rotação concorrente legítima (duas abas / retry) não é confundida com reuso
+  // (roubo) — pequena de propósito: grace 0 gera falsos positivos que derrubam o usuário.
+  REFRESH_TOKEN_TTL_MS: z.coerce
+    .number()
+    .int()
+    .min(60_000)
+    .max(90 * 24 * 60 * 60 * 1000)
+    .default(7 * 24 * 60 * 60 * 1000),
+  REFRESH_TOKEN_ABSOLUTE_TTL_MS: z.coerce
+    .number()
+    .int()
+    .min(60_000)
+    .max(365 * 24 * 60 * 60 * 1000)
+    .default(30 * 24 * 60 * 60 * 1000),
+  REFRESH_REUSE_GRACE_MS: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .max(5 * 60 * 1000)
+    .default(10_000),
+
+  // Rate limit do login por IP. Teto apertado: login é alvo clássico de brute force.
+  RATE_LIMIT_LOGIN_MAX: z.coerce.number().int().min(1).default(5),
+  RATE_LIMIT_LOGIN_WINDOW_MS: z.coerce
+    .number()
+    .int()
+    .min(1000)
+    .max(60 * 60 * 1000)
+    .default(60 * 1000),
+
   // Admin de bootstrap (SPEC 002). Opcionais: presentes, o server cria o primeiro admin
   // na subida (idempotente); ausentes, nada acontece. A senha nunca é logada — só o nome
   // e o motivo, como toda variável sensível deste schema.

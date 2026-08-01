@@ -51,6 +51,34 @@ describe('carregarEnv — defaults', () => {
   });
 });
 
+describe('carregarEnv — refresh token', () => {
+  it('aplica os defaults de validade deslizante, teto absoluto e graça', () => {
+    const env = carregarEnv(fonteValida());
+
+    expect(env.REFRESH_TOKEN_TTL_MS).toBe(7 * 24 * 60 * 60 * 1000);
+    expect(env.REFRESH_TOKEN_ABSOLUTE_TTL_MS).toBe(30 * 24 * 60 * 60 * 1000);
+    expect(env.REFRESH_REUSE_GRACE_MS).toBe(10_000);
+  });
+
+  it('aceita graça zerada, que torna a detecção de reuso imediata', () => {
+    const env = carregarEnv(fonteValida({ REFRESH_REUSE_GRACE_MS: '0' }));
+
+    expect(env.REFRESH_REUSE_GRACE_MS).toBe(0);
+  });
+
+  it.each(['59999', 'abc'])('rejeita REFRESH_TOKEN_TTL_MS=%s', (valor) => {
+    const erro = capturarErro(fonteValida({ REFRESH_TOKEN_TTL_MS: valor }));
+
+    expect(erro.variaveis.map((v) => v.nome)).toContain('REFRESH_TOKEN_TTL_MS');
+  });
+
+  it.each(['-1', 'abc'])('rejeita REFRESH_REUSE_GRACE_MS=%s', (valor) => {
+    const erro = capturarErro(fonteValida({ REFRESH_REUSE_GRACE_MS: valor }));
+
+    expect(erro.variaveis.map((v) => v.nome)).toContain('REFRESH_REUSE_GRACE_MS');
+  });
+});
+
 describe('carregarEnv — configuração de prontidão', () => {
   it('aplica os defaults de cache e timeout', () => {
     const env = carregarEnv(fonteValida());
