@@ -23,6 +23,8 @@ import {
   criarJwksService,
   criarRepositorioJwks,
   criarMedidorDeJwks,
+  criarKeyRotationService,
+  criarAgendadorDeRotacao,
 } from './modules/jwks/index.js';
 import { criarEncerrador } from './bootstrap/shutdown.js';
 import { construirApp } from './app.js';
@@ -63,11 +65,13 @@ async function iniciar(): Promise<void> {
   // Serviço de chaves: decifra a chave ativa uma vez aqui. Se houver chave a decifrar e a
   // MASTER_KEY faltar ou estiver errada, iniciar() lança e o processo cai — em vez de subir
   // servindo tokens que ninguém consegue verificar.
+  const repoJwks = criarRepositorioJwks(pool);
+  const medidorDeJwks = telemetria.metricas ? criarMedidorDeJwks() : undefined;
   const jwks = criarJwksService({
-    repo: criarRepositorioJwks(pool),
+    repo: repoJwks,
     cacheTtlMs: env.JWKS_CACHE_TTL_MS,
     ...(env.MASTER_KEY === undefined ? {} : { masterKey: env.MASTER_KEY }),
-    ...(telemetria.metricas ? { medidor: criarMedidorDeJwks() } : {}),
+    ...(medidorDeJwks === undefined ? {} : { medidor: medidorDeJwks }),
   });
   try {
     await jwks.iniciar();
@@ -77,6 +81,32 @@ async function iniciar(): Promise<void> {
     await pool.end();
     process.exit(1);
   }
+
+  // Rotação agendada. Só age se houver MASTER_KEY: sem ela não há como cifrar a privada da
+  // chave nova, e a instância já subiu porque ainda não existe chave alguma a decifrar.
+  // Com N réplicas, todas rodam o timer e o advisory lock decide qual rotaciona.
+  const agendadorDeRotacao =
+    env.MASTER_KEY === undefined
+      ? undefined
+      : criarAgendadorDeRotacao({
+          rotacao: criarKeyRotationService({
+            repo: repoJwks,
+            masterKey: env.MASTER_KEY,
+            logger,
+            invalidarCache: () => {
+              jwks.invalidar();
+            },
+            graceMs: env.JWKS_GRACE_PERIOD_MS,
+            prepublicacaoMinMs: env.JWKS_PREPUBLISH_MIN_MS,
+            purgaAposMs: env.JWKS_PURGE_AFTER_MS,
+            ...(medidorDeJwks === undefined ? {} : { medidor: medidorDeJwks }),
+          }),
+          logger,
+          habilitado: env.JWKS_ROTATION_ENABLED,
+          intervaloMs: env.JWKS_ROTATION_CHECK_INTERVAL_MS,
+          idadeMaximaMs: env.JWKS_ROTATION_MAX_AGE_MS,
+        });
+  agendadorDeRotacao?.iniciar();
 
   let mongo;
   let banco;
@@ -136,6 +166,8 @@ async function iniciar(): Promise<void> {
     // instância da rotação enquanto ela ainda drena as requisições em voo.
     aoIniciarEncerramento: () => {
       prontidao.marcarEncerrando();
+      // Antes de drenar: uma rotação iniciada agora terminaria com o pool já fechando.
+      agendadorDeRotacao?.parar();
     },
     encerrarProcesso: (codigo) => {
       process.exit(codigo);
