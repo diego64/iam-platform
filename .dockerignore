@@ -1,0 +1,46 @@
+# Contexto de build enxuto e sem segredo.
+# Toda camada de imagem é legível por quem tem a imagem (docker history),
+# então nada aqui pode conter chave, .env ou histórico de git.
+
+# Dependências e artefatos — reinstalados/recompilados dentro do build
+node_modules
+dist
+coverage
+.stryker-tmp
+reports
+
+# Segredos e material de chave (ADR-0003: privada só via env/secret manager)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+security/sbom
+
+# Histórico e metadados de VCS
+.git
+.gitignore
+.gitattributes
+.github
+.husky
+
+# Nada disso vai para runtime
+tests
+specs
+docs
+infra/backup
+monitoring
+openapi
+scaffold.sh
+stryker.config.json
+vitest.config.ts
+.editorconfig
+.prettierrc
+.prettierignore
+.lintstagedrc
+.spectral.yaml
+CHANGELOG.md
+CONTRIBUTING.md
+SECURITY.md
+README.md
+CLAUDE.md
