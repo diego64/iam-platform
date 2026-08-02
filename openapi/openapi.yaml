@@ -19,6 +19,11 @@ tags:
     description: Exposição de métricas para raspagem pelo Prometheus.
   - name: jwks
     description: Publicação das chaves públicas de verificação (JWK Set).
+  - name: keys
+    description: >-
+      Administração das chaves de assinatura. A rotação acontece em duas fases separadas no
+      tempo: preparar publica a próxima chave no JWKS, e promover só é aceito depois que ela
+      ficou visível tempo suficiente para os consumidores a conhecerem.
   - name: auth
     description: Login, logout e perfil do usuário autenticado.
   - name: rbac
@@ -195,6 +200,79 @@ components:
         status: { type: string, enum: [active, blocked] }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    KeyMetadata:
+      type: object
+      # additionalProperties: false é a garantia de contrato de que nenhum campo de material
+      # de chave escapa por esta rota — não é só estilo.
+      additionalProperties: false
+      required:
+        [
+          kid,
+          algorithm,
+          status,
+          created_at,
+          activated_at,
+          retired_at,
+          verifiable_until,
+          age_seconds,
+        ]
+      properties:
+        kid: { type: string, format: uuid }
+        algorithm: { type: string, enum: [EdDSA] }
+        status: { type: string, enum: [active, next, retired] }
+        created_at: { type: string, format: date-time }
+        activated_at: { type: string, format: date-time, nullable: true }
+        retired_at: { type: string, format: date-time, nullable: true }
+        verifiable_until:
+          type: string
+          format: date-time
+          nullable: true
+          description: Instante em que a chave deixa de verificar tokens.
+        age_seconds: { type: integer, minimum: 0 }
+    KeyList:
+      type: object
+      additionalProperties: false
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/KeyMetadata' }
+        total: { type: integer }
+    PreparedKey:
+      type: object
+      additionalProperties: false
+      required: [kid, status, created_at, rotatable_at]
+      properties:
+        kid: { type: string, format: uuid }
+        status: { type: string, enum: [next] }
+        created_at: { type: string, format: date-time }
+        rotatable_at:
+          type: string
+          format: date-time
+          description: A partir de quando a promoção deixa de responder 409.
+    RotationResult:
+      type: object
+      additionalProperties: false
+      required: [previous_kid, active_kid, next_kid, verifiable_until]
+      properties:
+        previous_kid: { type: string, format: uuid, nullable: true }
+        active_kid: { type: string, format: uuid }
+        next_kid: { type: string, format: uuid }
+        verifiable_until:
+          type: string
+          format: date-time
+          nullable: true
+          description: Até quando a chave aposentada ainda verifica os tokens já emitidos.
+    RevocationResult:
+      type: object
+      additionalProperties: false
+      required: [revoked_kid, active_kid, tokens_invalidated]
+      properties:
+        revoked_kid: { type: string, format: uuid }
+        active_kid: { type: string, format: uuid, nullable: true }
+        tokens_invalidated:
+          type: boolean
+          description: Falso quando a chave era apenas pré-publicada e nunca assinou nada.
     Role:
       type: object
       additionalProperties: false
@@ -1425,6 +1503,108 @@ paths:
         - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
       responses:
         '204': { description: Removida }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+        '404': { $ref: '#/components/responses/ProblemNaoEncontrado' }
+        '409': { $ref: '#/components/responses/ProblemConflito' }
+  /admin/keys:
+    get:
+      tags: [keys]
+      summary: Lista os metadados das chaves de assinatura
+      description: Exige a permissão `keys:read`. Nunca devolve material privado.
+      operationId: keysList
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { in: query, name: status, schema: { type: string, enum: [active, next, retired] } }
+      responses:
+        '200':
+          description: Chaves com seus metadados
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KeyList' }
+        '400': { $ref: '#/components/responses/ProblemValidacao' }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+  /admin/keys/prepare:
+    post:
+      tags: [keys]
+      summary: Gera e publica a próxima chave
+      description: >-
+        Exige `keys:write`. Idempotente: com uma chave pré-publicada já presente, devolve 200
+        com ela em vez de gerar outra. A partir daqui corre a janela de pré-publicação, que a
+        promoção exige ter sido cumprida.
+      operationId: keysPrepare
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: Já existia uma chave pré-publicada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PreparedKey' }
+        '201':
+          description: Chave pré-publicada criada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PreparedKey' }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+  /admin/keys/rotate:
+    post:
+      tags: [keys]
+      summary: Promove a chave pré-publicada e aposenta a ativa
+      description: >-
+        Exige `keys:write`. Recusa com 409 quando não há chave pré-publicada, quando ela ainda
+        não cumpriu a janela de pré-publicação, ou quando outra instância está rotacionando.
+      operationId: keysRotate
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                motivo: { type: string, minLength: 3, maxLength: 256 }
+      responses:
+        '200':
+          description: Rotação concluída
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RotationResult' }
+        '400': { $ref: '#/components/responses/ProblemValidacao' }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+        '409': { $ref: '#/components/responses/ProblemConflito' }
+  /admin/keys/{kid}/revoke:
+    post:
+      tags: [keys]
+      summary: Revoga uma chave imediatamente
+      description: >-
+        Exige o **papel** `superadmin`, não a permissão de escrita: encerrar uma chave
+        invalida de uma vez todos os tokens que ela assinou. Se o alvo for a chave ativa, a
+        pré-publicada é promovida no mesmo passo — sem candidata pronta, responde 409.
+      operationId: keysRevoke
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { in: path, name: kid, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [motivo]
+              properties:
+                motivo: { type: string, minLength: 3, maxLength: 256 }
+      responses:
+        '200':
+          description: Chave revogada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RevocationResult' }
+        '400': { $ref: '#/components/responses/ProblemValidacao' }
         '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
         '403': { $ref: '#/components/responses/ProblemSemPermissao' }
         '404': { $ref: '#/components/responses/ProblemNaoEncontrado' }
