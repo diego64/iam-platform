@@ -205,6 +205,27 @@ export const esquemaEnv = z.object({
     .max(5 * 60 * 1000)
     .default(10_000),
 
+  // Janela padrão em que o segredo anterior de um cliente continua aceito depois da
+  // rotação. Existe porque trocar o segredo de um serviço em produção envolve deploy: com a
+  // troca atômica, haveria um intervalo em que as réplicas antigas já não autenticam.
+  // O teto de 7 dias limita por quanto tempo uma segunda via pode ficar viva.
+  CLIENT_SECRET_OVERLAP_DEFAULT_MS: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .max(7 * 24 * 60 * 60 * 1000)
+    .default(24 * 60 * 60 * 1000),
+
+  // De quanto em quanto tempo o último uso de um cliente é regravado. Gravar a cada
+  // autenticação transformaria uma leitura em escrita por requisição; o campo responde
+  // "este cliente ainda é usado?", pergunta que tolera minutos de imprecisão.
+  CLIENT_LAST_USED_THROTTLE_MS: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .max(24 * 60 * 60 * 1000)
+    .default(5 * 60 * 1000),
+
   // Rate limit do login por IP. Teto apertado: login é alvo clássico de brute force.
   RATE_LIMIT_LOGIN_MAX: z.coerce.number().int().min(1).default(5),
   RATE_LIMIT_LOGIN_WINDOW_MS: z.coerce

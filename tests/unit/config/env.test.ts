@@ -302,6 +302,37 @@ describe('carregarConfigDeTelemetria — leitura antecipada, sem lançar', () =>
   });
 });
 
+describe('carregarEnv — clientes de API', () => {
+  it('aplica os defaults de sobreposição e throttle', () => {
+    const env = carregarEnv(fonteValida());
+
+    expect(env.CLIENT_SECRET_OVERLAP_DEFAULT_MS).toBe(86_400_000);
+    expect(env.CLIENT_LAST_USED_THROTTLE_MS).toBe(300_000);
+  });
+
+  it('aceita sobreposição zero — rotação sem janela nenhuma', () => {
+    const env = carregarEnv(fonteValida({ CLIENT_SECRET_OVERLAP_DEFAULT_MS: '0' }));
+
+    expect(env.CLIENT_SECRET_OVERLAP_DEFAULT_MS).toBe(0);
+  });
+
+  // Uma segunda via de autenticação viva por mais de uma semana deixa de ser janela de
+  // deploy e vira credencial paralela esquecida.
+  it('rejeita sobreposição acima de sete dias', () => {
+    const erro = capturarErro(
+      fonteValida({ CLIENT_SECRET_OVERLAP_DEFAULT_MS: String(8 * 24 * 60 * 60 * 1000) }),
+    );
+
+    expect(erro.variaveis.map((v) => v.nome)).toContain('CLIENT_SECRET_OVERLAP_DEFAULT_MS');
+  });
+
+  it('rejeita throttle negativo', () => {
+    const erro = capturarErro(fonteValida({ CLIENT_LAST_USED_THROTTLE_MS: '-1' }));
+
+    expect(erro.variaveis.map((v) => v.nome)).toContain('CLIENT_LAST_USED_THROTTLE_MS');
+  });
+});
+
 describe('carregarEnv — rotação de chaves', () => {
   it('aplica os defaults da rotação', () => {
     const env = carregarEnv(fonteValida());
