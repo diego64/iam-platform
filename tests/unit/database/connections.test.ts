@@ -51,6 +51,54 @@ describe('criarPoolPostgres', () => {
       await pool.end();
     }
   });
+
+  it('não usa TLS para host local', async () => {
+    const pool = criarPoolPostgres(envDeTeste());
+    try {
+      expect(pool.options.ssl).toBeUndefined();
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it('para host do Render, liga TLS com verificação de certificado', async () => {
+    const env = envDeTeste({
+      POSTGRES_URL: 'postgres://dpg-abc.oregon-postgres.render.com:5432/iam',
+    });
+    const pool = criarPoolPostgres(env);
+    try {
+      expect(pool.options.ssl).toMatchObject({ rejectUnauthorized: true });
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it('não liga TLS de Render para host que só contém render.com como substring', async () => {
+    // Host de atacante que embute a string: o match por hostname não pode cair nessa.
+    const env = envDeTeste({ POSTGRES_URL: 'postgres://render.com.atacante.example:5432/iam' });
+    const pool = criarPoolPostgres(env);
+    try {
+      expect(pool.options.ssl).toBeUndefined();
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it('inclui o CA quando POSTGRES_CA_CERT é informado, sem desligar a verificação', async () => {
+    const env = envDeTeste({
+      POSTGRES_URL: 'postgres://dpg-abc.oregon-postgres.render.com:5432/iam',
+      POSTGRES_CA_CERT: '-----BEGIN CERTIFICATE-----\nMIIB...\n-----END CERTIFICATE-----',
+    });
+    const pool = criarPoolPostgres(env);
+    try {
+      expect(pool.options.ssl).toMatchObject({
+        rejectUnauthorized: true,
+        ca: env.POSTGRES_CA_CERT,
+      });
+    } finally {
+      await pool.end();
+    }
+  });
 });
 
 describe('conectarMongo', () => {

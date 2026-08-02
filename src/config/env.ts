@@ -71,6 +71,10 @@ export const esquemaEnv = z.object({
 
   POSTGRES_URL: z.string().url().startsWith('postgres'),
   POSTGRES_POOL_MAX: z.coerce.number().int().min(1).max(100).default(10),
+  // Certificado da autoridade (PEM) para verificar o TLS do Postgres gerenciado, quando o
+  // certificado do provedor não está no bundle de CAs do sistema. Ausente, a verificação
+  // usa as CAs do sistema — nunca é desligada.
+  POSTGRES_CA_CERT: z.string().min(1).optional(),
 
   MONGODB_URL: z.string().url().startsWith('mongodb'),
   MONGODB_DB: z.string().min(1).default('iam_sessions'),
