@@ -1,9 +1,11 @@
 /**
- * Monta um app Fastify com as rotas de auth e de RBAC, para os testes de integração.
+ * Monta um app Fastify com as rotas de auth e as rotas administrativas de chaves, para os
+ * testes de integração.
  *
- * Bancos reais (usuários/papéis no PostgreSQL, denylist no Mongo) e um JWKS real. O login
- * emite tokens com a claim `perm` de verdade, então os guards do RBAC são exercitados
- * ponta a ponta: seed do usuário + papéis → login → chamada autorizada.
+ * Bancos reais e um JWKS real: o login emite tokens com a claim `perm` de verdade, então os
+ * guards que protegem a rotação são exercitados ponta a ponta. O serviço de rotação recebe a
+ * janela de pré-publicação por parâmetro para o teste poder exercitar tanto a recusa por
+ * chave recente quanto a promoção bem-sucedida sem esperar dez minutos.
  */
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import {
@@ -24,7 +26,11 @@ import {
   criarRepositorioJwks,
   criarJwksService,
   garantirChaveDeBootstrap,
+  registrarRotasDeJwks,
+  type RepositorioJwks,
 } from '../../../src/modules/jwks/index.js';
+import { criarKeyRotationService } from '../../../src/modules/jwks/services/key-rotation.service.js';
+import { registrarRotasDeChaves } from '../../../src/modules/jwks/routes/keys-admin.routes.js';
 import {
   registrarRotasDeAuth,
   criarAuthService,
@@ -34,27 +40,26 @@ import {
   criarVerificadorDeAccessToken,
   criarRefreshTokenStub,
 } from '../../../src/modules/auth/index.js';
-import {
-  registrarRotasDeRbac,
-  criarGuardsDeAutorizacao,
-  criarRepositorioDePapel,
-  criarRepositorioDePermissao,
-  criarRepositorioDeAssociacao,
-  criarRbacService,
-  criarAssignmentService,
-} from '../../../src/modules/rbac/index.js';
+import { criarGuardsDeAutorizacao } from '../../../src/modules/rbac/index.js';
 
 const TIPO_PROBLEM_JSON = 'application/problem+json';
 const EMISSOR = 'https://iam.example.com';
 const AUDIENCIA = 'iam-clients';
 const MASTER = 'master-key-de-teste-com-mais-de-32-bytes';
 
-export interface AppDeRbac {
+export interface AppDeChaves {
   readonly app: FastifyInstance;
   readonly servicoDeSenha: ServicoDeSenha;
+  readonly repo: RepositorioJwks;
 }
 
-export async function montarAppDeRbac(opcoes: { pool: Pool; banco: Db }): Promise<AppDeRbac> {
+export async function montarAppDeChaves(opcoes: {
+  pool: Pool;
+  banco: Db;
+  /** Janela de pré-publicação; zero deixa a promoção liberada de imediato. */
+  prepublicacaoMinMs?: number;
+  graceMs?: number;
+}): Promise<AppDeChaves> {
   const app = Fastify({ logger: false });
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
@@ -79,30 +84,34 @@ export async function montarAppDeRbac(opcoes: { pool: Pool; banco: Db }): Promis
       .send(montarProblema('internal-error', 'Erro interno', 500));
   });
 
-  const repoJwks = criarRepositorioJwks(opcoes.pool);
-  await garantirChaveDeBootstrap({
-    repo: repoJwks,
-    masterKey: MASTER,
-    logger: criarLogger({ nivel: 'fatal' }),
-  });
-  const jwks = criarJwksService({
-    repo: repoJwks,
-    masterKey: MASTER,
-    cacheTtlMs: 300_000,
-  });
+  const logger = criarLogger({ nivel: 'fatal' });
+  const repo = criarRepositorioJwks(opcoes.pool);
+  await garantirChaveDeBootstrap({ repo, masterKey: MASTER, logger });
+
+  const jwks = criarJwksService({ repo, masterKey: MASTER, cacheTtlMs: 0 });
   await jwks.iniciar();
+
+  const rotacao = criarKeyRotationService({
+    repo,
+    masterKey: MASTER,
+    logger,
+    invalidarCache: () => {
+      jwks.invalidar();
+    },
+    graceMs: opcoes.graceMs ?? 900_000,
+    prepublicacaoMinMs: opcoes.prepublicacaoMinMs ?? 0,
+    purgaAposMs: 24 * 60 * 60 * 1000,
+  });
 
   const servicoDeSenha = criarServicoDeSenha({ custo: 2 ** 14, blocos: 8, paralelismo: 1 });
   const denylist = criarRepositorioDeDenylist(opcoes.banco);
-  const repoAuth = criarRepositorioDeAutenticacao(opcoes.pool);
   const tokenService = criarTokenService(jwks, {
     emissor: EMISSOR,
     audiencia: AUDIENCIA,
     ttlSegundos: 900,
   });
-
   const authService = criarAuthService({
-    repo: repoAuth,
+    repo: criarRepositorioDeAutenticacao(opcoes.pool),
     servicoDeSenha,
     tokenService,
     refreshToken: criarRefreshTokenStub(),
@@ -115,22 +124,16 @@ export async function montarAppDeRbac(opcoes: { pool: Pool; banco: Db }): Promis
     audiencia: AUDIENCIA,
   });
 
-  const rbacService = criarRbacService({
-    papeis: criarRepositorioDePapel(opcoes.pool),
-    permissoes: criarRepositorioDePermissao(opcoes.pool),
-    associacoes: criarRepositorioDeAssociacao(opcoes.pool),
-  });
-  const assignmentService = criarAssignmentService({
-    associacoes: criarRepositorioDeAssociacao(opcoes.pool),
-  });
-
+  // O endpoint público entra junto: é por ele que o teste observa o efeito da rotação no
+  // conjunto que os consumidores enxergam.
+  registrarRotasDeJwks(app, { jwks });
   registrarRotasDeAuth(app, { authService, verificarAccessToken });
-  registrarRotasDeRbac(app, {
-    rbacService,
-    assignmentService,
+  registrarRotasDeChaves(app, {
+    rotacao,
+    repo,
     guards: criarGuardsDeAutorizacao(),
     verificarAccessToken,
   });
   await app.ready();
-  return { app, servicoDeSenha };
+  return { app, servicoDeSenha, repo };
 }
