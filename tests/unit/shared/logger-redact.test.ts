@@ -89,3 +89,63 @@ describe('censura do logger', () => {
     }
   });
 });
+
+describe('censura de credenciais de cliente de API', () => {
+  it('remove o segredo em claro vindo do corpo da autenticação', () => {
+    const { linhas, destino } = capturar();
+
+    criarLogger({ destino }).info(
+      { req: { body: { client_id: 'cli_publico', client_secret: 'SEGREDO-EM-CLARO' } } },
+      'oauth.token',
+    );
+
+    const texto = JSON.stringify(linhas[0]);
+    expect(texto).not.toContain('SEGREDO-EM-CLARO');
+    expect(texto).toContain('[censurado]');
+    // O identificador é público e precisa continuar legível para a investigação servir.
+    expect(texto).toContain('cli_publico');
+  });
+
+  // O hash no log dá material para atacar offline exatamente o que o scrypt protege.
+  it('remove o hash e o hash anterior de um cliente logado inteiro', () => {
+    const { linhas, destino } = capturar();
+
+    criarLogger({ destino }).info(
+      {
+        cliente: {
+          client_id: 'cli_publico',
+          secret_hash: 'scrypt$16384$8$1$SALT-SECRETO$HASH-SECRETO',
+          previous_secret_hash: 'scrypt$16384$8$1$SALT-ANTIGO$HASH-ANTIGO',
+        },
+      },
+      'clients.rotate',
+    );
+
+    const texto = JSON.stringify(linhas[0]);
+    expect(texto).not.toContain('HASH-SECRETO');
+    expect(texto).not.toContain('HASH-ANTIGO');
+  });
+
+  it('cobre também a grafia camelCase, que é como o domínio nomeia os campos', () => {
+    const { linhas, destino } = capturar();
+
+    criarLogger({ destino }).info(
+      { clientSecret: 'CLARO-CAMEL', secretHash: 'HASH-CAMEL' },
+      'clients.create',
+    );
+
+    const texto = JSON.stringify(linhas[0]);
+    expect(texto).not.toContain('CLARO-CAMEL');
+    expect(texto).not.toContain('HASH-CAMEL');
+  });
+
+  it('declara os caminhos de cliente na lista de censura', () => {
+    const caminhos = caminhosDeCensura();
+
+    for (const campo of ['client_secret', 'secret_hash', 'previous_secret_hash']) {
+      expect(caminhos).toContain(campo);
+      expect(caminhos).toContain(`*.${campo}`);
+      expect(caminhos).toContain(`req.body.${campo}`);
+    }
+  });
+});
