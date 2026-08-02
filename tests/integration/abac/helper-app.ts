@@ -58,6 +58,8 @@ import {
 } from '../../../src/modules/abac/index.js';
 
 const TIPO_PROBLEM_JSON = 'application/problem+json';
+/** Teto da leitura do proving ground, no formato que o `@fastify/rate-limit` espera. */
+const LIMITE_DE_LEITURA = { max: 200, timeWindow: '1 minute' };
 const EMISSOR = 'https://iam.example.com';
 const AUDIENCIA = 'iam-clients';
 const MASTER = 'master-key-de-teste-com-mais-de-32-bytes';
@@ -169,6 +171,10 @@ export async function montarAppDeAbac(opcoes: {
   app.get(
     '/users/:id',
     {
+      // O handler consulta o banco, então declara teto próprio: o plugin foi registrado com
+      // `global: false`, e sem isto a rota ficaria sem limite nenhum. Teto folgado — aqui ele
+      // existe para o fixture espelhar a rota real, não para ser exercitado pelos testes.
+      config: { rateLimit: LIMITE_DE_LEITURA },
       preHandler: [
         verificarAccessToken,
         guardsRbac.exigirPermissao('users:read'),
