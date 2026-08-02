@@ -18,7 +18,7 @@ import { limparJwks, recriarSchemaJwks } from './schema.js';
 
 const MASTER_CORRETA = 'master-key-correta-com-mais-de-32-bytes';
 const MASTER_ERRADA = 'master-key-errada-com-mais-de-32-bytesx';
-const CONFIG_BASE = { graceMs: 900_000, cacheTtlMs: 300_000 };
+const CONFIG_BASE = { cacheTtlMs: 300_000 };
 
 let pool: Pool;
 let repo: RepositorioJwks;

@@ -27,6 +27,7 @@ async function novaChave(status: StatusDaChave): Promise<ChaveJwks> {
     criadaEm: new Date(),
     ativadaEm: status === 'active' ? new Date() : null,
     aposentadaEm: null,
+    verificavelAte: null,
   };
 }
 
@@ -38,7 +39,9 @@ function repoFake(chaves: ChaveJwks[]): { repo: RepositorioJwks; chamadasElegive
       chamadas += 1;
       return Promise.resolve(chaves);
     },
+    listarMetadados: () => Promise.resolve(chaves),
     obterAtiva: () => Promise.resolve(chaves.find((c) => c.status === 'active') ?? null),
+    obterProxima: () => Promise.resolve(chaves.find((c) => c.status === 'next') ?? null),
     contarPorStatus: () =>
       Promise.resolve({
         active: chaves.filter((c) => c.status === 'active').length,
@@ -50,7 +53,7 @@ function repoFake(chaves: ChaveJwks[]): { repo: RepositorioJwks; chamadasElegive
 }
 
 function config(repo: RepositorioJwks, extra: Partial<ConfiguracaoJwks> = {}): ConfiguracaoJwks {
-  return { repo, masterKey: MASTER, graceMs: 900_000, cacheTtlMs: 300_000, ...extra };
+  return { repo, masterKey: MASTER, cacheTtlMs: 300_000, ...extra };
 }
 
 describe('cache', () => {
@@ -138,7 +141,6 @@ describe('fail closed no boot', () => {
     const { repo } = repoFake([await novaChave('active')]);
     const service = criarJwksService({
       repo,
-      graceMs: 900_000,
       cacheTtlMs: 300_000,
     });
 

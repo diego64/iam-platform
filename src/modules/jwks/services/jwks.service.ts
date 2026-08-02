@@ -32,8 +32,11 @@ export interface ConfiguracaoJwks {
   readonly repo: RepositorioJwks;
   /** Segredo para decifrar a privada. Ausente só é tolerado se não houver chave active. */
   readonly masterKey?: string;
-  /** Janela de graça das chaves retired (ms). */
-  readonly graceMs: number;
+  /**
+   * A janela de graça não entra aqui: ela é gravada em `verifiable_until` no momento da
+   * aposentadoria, e quem a aplica é o serviço de rotação. O conjunto de verificação só
+   * compara a coluna com o relógio.
+   */
   /** TTL de segurança do cache (ms). */
   readonly cacheTtlMs: number;
   readonly medidor?: MedidorDeJwks;
@@ -70,7 +73,7 @@ export function criarJwksService(config: ConfiguracaoJwks): JwksService {
 
   async function carregar(): Promise<EstadoDoCache> {
     const [elegiveis, ativa, contagem] = await Promise.all([
-      config.repo.listarElegiveis(new Date(agora()), config.graceMs),
+      config.repo.listarElegiveis(new Date(agora())),
       config.repo.obterAtiva(),
       config.repo.contarPorStatus(),
     ]);

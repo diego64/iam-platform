@@ -39,7 +39,7 @@ beforeAll(async () => {
     logger: criarLogger({ nivel: 'fatal' }),
   });
 
-  service = criarJwksService({ repo, masterKey: MASTER, graceMs: 900_000, cacheTtlMs: 300_000 });
+  service = criarJwksService({ repo, masterKey: MASTER, cacheTtlMs: 300_000 });
   await service.iniciar();
   app = await construirApp(envDeIntegracao(), { jwks: service });
 });

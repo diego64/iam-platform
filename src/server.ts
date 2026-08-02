@@ -65,7 +65,6 @@ async function iniciar(): Promise<void> {
   // servindo tokens que ninguém consegue verificar.
   const jwks = criarJwksService({
     repo: criarRepositorioJwks(pool),
-    graceMs: env.JWKS_GRACE_PERIOD_MS,
     cacheTtlMs: env.JWKS_CACHE_TTL_MS,
     ...(env.MASTER_KEY === undefined ? {} : { masterKey: env.MASTER_KEY }),
     ...(telemetria.metricas ? { medidor: criarMedidorDeJwks() } : {}),

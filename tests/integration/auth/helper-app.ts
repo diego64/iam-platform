@@ -90,7 +90,6 @@ export async function montarAppDeAuth(opcoes: { pool: Pool; banco: Db }): Promis
   const jwks = criarJwksService({
     repo: repoJwks,
     masterKey: MASTER,
-    graceMs: 900_000,
     cacheTtlMs: 300_000,
   });
   await jwks.iniciar();
