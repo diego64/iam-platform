@@ -15,11 +15,9 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
 
 COPY tsconfig.json tsconfig.build.json ./
 COPY src ./src
+# O script de build já copia os .sql das migrations para dist/database/migrations: tsc só
+# emite JS, e o runner precisa achá-los em runtime, tanto na imagem quanto no deploy nativo.
 RUN pnpm build
-
-# tsc só emite JS; os .sql das migrations precisam ir junto para o migrate runner os achar
-# em runtime (dist/database/migrations), já que o preDeploy roda contra a imagem, não o src.
-RUN mkdir -p dist/database/migrations && cp src/database/migrations/*.sql dist/database/migrations/
 
 # Remove as devDependencies do node_modules que será copiado para o runtime.
 # --ignore-scripts é obrigatório: prune reexecuta o "prepare", que chama husky —
