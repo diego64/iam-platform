@@ -67,7 +67,7 @@ export interface KeyRotationService {
   prepararProxima(ator?: string): Promise<ChavePreparada>;
   rotacionar(opcoes?: {
     motivo?: MotivoDeRotacao;
-    ator?: string;
+    ator?: string | undefined;
   }): Promise<ResultadoDeRotacaoDeChave>;
   revogar(kid: string, motivo: string, ator?: string): Promise<ResultadoDeRevogacao>;
   /** Remove chaves que já não verificam nada. Devolve quantas saíram. */
