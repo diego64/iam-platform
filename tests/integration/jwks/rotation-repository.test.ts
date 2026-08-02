@@ -86,7 +86,7 @@ describe('rotacionar', () => {
 
     await repo.rotacionar({ graceMs: 0 });
 
-    const kids = (await repo.listarElegiveis(new Date())).map((c) => c.kid);
+    const kids = (await repo.listarElegiveis()).map((c) => c.kid);
     expect(kids).toHaveLength(1); // só a recém-promovida
     expect((await repo.contarPorStatus()).retired).toBe(1);
   });
@@ -171,7 +171,7 @@ describe('revogar', () => {
 
     expect(revogada?.kid).toBe(chave.kid);
     expect(revogada?.status).toBe('retired');
-    const kids = (await repo.listarElegiveis(new Date())).map((c) => c.kid);
+    const kids = (await repo.listarElegiveis()).map((c) => c.kid);
     expect(kids).not.toContain(chave.kid);
   });
 

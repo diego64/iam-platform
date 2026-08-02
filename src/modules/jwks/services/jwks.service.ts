@@ -73,7 +73,7 @@ export function criarJwksService(config: ConfiguracaoJwks): JwksService {
 
   async function carregar(): Promise<EstadoDoCache> {
     const [elegiveis, ativa, contagem] = await Promise.all([
-      config.repo.listarElegiveis(new Date(agora())),
+      config.repo.listarElegiveis(),
       config.repo.obterAtiva(),
       config.repo.contarPorStatus(),
     ]);

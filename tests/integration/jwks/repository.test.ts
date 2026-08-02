@@ -110,7 +110,7 @@ describe('listarElegiveis (verificabilidade materializada)', () => {
     const fora = await repo.inserir(await novaEntrada('retired'));
     await aposentar(fora.kid, new Date(agora.getTime() - 5 * 60 * 1000));
 
-    const kids = (await repo.listarElegiveis(agora)).map((c) => c.kid);
+    const kids = (await repo.listarElegiveis()).map((c) => c.kid);
 
     expect(kids).toContain(dentro.kid);
     expect(kids).not.toContain(fora.kid);
@@ -123,7 +123,7 @@ describe('listarElegiveis (verificabilidade materializada)', () => {
     const ate = new Date(agora.getTime() + 60_000);
     await aposentar(chave.kid, ate);
 
-    const elegivel = (await repo.listarElegiveis(agora)).find((c) => c.kid === chave.kid);
+    const elegivel = (await repo.listarElegiveis()).find((c) => c.kid === chave.kid);
 
     expect(elegivel?.verificavelAte?.toISOString()).toBe(ate.toISOString());
     expect(elegivel?.aposentadaEm).toBeInstanceOf(Date);
@@ -134,7 +134,7 @@ describe('listarElegiveis (verificabilidade materializada)', () => {
   it('exclui retired sem verifiable_until', async () => {
     const chave = await repo.inserir(await novaEntrada('retired'));
 
-    const kids = (await repo.listarElegiveis(new Date())).map((c) => c.kid);
+    const kids = (await repo.listarElegiveis()).map((c) => c.kid);
 
     expect(kids).not.toContain(chave.kid);
   });

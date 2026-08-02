@@ -108,13 +108,18 @@ export interface RepositorioJwks {
   /** A chave pré-publicada, se houver. O índice único garante que é no máximo uma. */
   obterProxima(): Promise<ChaveJwks | null>;
   /**
-   * active + next + retired que ainda verifica (`verifiable_until > agora`).
+   * active + next + retired que ainda verifica.
    *
    * A janela não é parâmetro: ela já está materializada em `verifiable_until` desde o
    * momento da aposentadoria, então mudar a configuração de graça não ressuscita chave
    * nenhuma nem encurta a vida das que já foram aposentadas sob a janela anterior.
+   *
+   * O instante de comparação também não é parâmetro, e isso é deliberado: `verifiable_until`
+   * é gravado com o relógio do banco, então compará-lo com o relógio da aplicação
+   * introduziria a diferença entre os dois na decisão. Numa revogação de emergência, essa
+   * diferença é exatamente o tempo a mais que a chave comprometida continua aceita.
    */
-  listarElegiveis(agora: Date): Promise<ChaveJwks[]>;
+  listarElegiveis(): Promise<ChaveJwks[]>;
   /** Metadados para a superfície administrativa — sem tocar no material cifrado. */
   listarMetadados(filtro?: { status?: StatusDaChave }): Promise<MetadadosDeChave[]>;
   obterMetadadosPorKid(kid: string): Promise<MetadadosDeChave | null>;
@@ -218,13 +223,12 @@ export function criarRepositorioJwks(pool: Pool): RepositorioJwks {
       return linha === undefined ? null : paraEntidade(linha);
     },
 
-    async listarElegiveis(agora: Date): Promise<ChaveJwks[]> {
+    async listarElegiveis(): Promise<ChaveJwks[]> {
       const { rows } = await pool.query<LinhaJwks>(
         `SELECT ${COLUNAS} FROM jwks
          WHERE status IN ('active', 'next')
-            OR (verifiable_until IS NOT NULL AND verifiable_until > $1)
+            OR (verifiable_until IS NOT NULL AND verifiable_until > now())
          ORDER BY created_at DESC`,
-        [agora],
       );
       return rows.map(paraEntidade);
     },
