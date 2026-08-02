@@ -4,6 +4,7 @@
  * controller traduz para RFC 7807.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { Writable } from 'node:stream';
 import {
   criarApiClientService,
   type ApiClientService,
@@ -213,5 +214,79 @@ describe('revogarSegredoAnterior', () => {
     await expect(service.revogarSegredoAnterior('id-1')).rejects.toMatchObject({
       codigo: 'sem-segredo-anterior',
     });
+  });
+});
+
+describe('log estruturado das mutações', () => {
+  /** Captura a saída JSON real do Pino, passando pela censura configurada. */
+  function comCaptura(): { linhas: () => Record<string, unknown>[] } {
+    const capturadas: string[] = [];
+    const destino = new Writable({
+      write(pedaco: Buffer, _codificacao, prosseguir): void {
+        capturadas.push(pedaco.toString());
+        prosseguir();
+      },
+    });
+
+    montar();
+    service = criarApiClientService({
+      repo: repo as unknown as RepositorioDeClientes,
+      escopos,
+      servicoDeSenha,
+      logger: criarLogger({ nivel: 'info', destino }),
+      sobreposicaoPadraoMs: 86_400_000,
+    });
+
+    return {
+      linhas: () =>
+        capturadas
+          .join('')
+          .split('\n')
+          .filter((l) => l.trim() !== '')
+          .map((l) => JSON.parse(l) as Record<string, unknown>),
+    };
+  }
+
+  it('registra a criação com ator, cliente e delta', async () => {
+    const captura = comCaptura();
+
+    await service.criar(
+      { name: 'faturamento', scopes: ['orders:read'], grantTypes: ['client_credentials'] },
+      'ator-123',
+    );
+
+    expect(captura.linhas().at(-1)).toMatchObject({
+      ator_id: 'ator-123',
+      client_id: 'cli_publico',
+    });
+  });
+
+  it('registra a rotação de segredo', async () => {
+    const captura = comCaptura();
+
+    await service.rotacionarSegredo('id-1', undefined, 'ator-456');
+
+    const linha = captura.linhas().at(-1);
+    expect(linha).toMatchObject({ ator_id: 'ator-456', client_id: 'cli_publico' });
+    expect(String(linha?.['msg'])).toContain('clients.rotate');
+  });
+
+  // O log é retido e indexado por muito mais tempo que o segredo que ele descreve.
+  it('nenhuma linha carrega o segredo em claro nem o hash', async () => {
+    const captura = comCaptura();
+
+    const criado = await service.criar(
+      { name: 'x', scopes: [], grantTypes: ['client_credentials'] },
+      'ator-1',
+    );
+    const rotacionado = await service.rotacionarSegredo('id-1', undefined, 'ator-1');
+    await service.atualizar('id-1', { name: 'novo' }, 'ator-1');
+    await service.remover('id-1', 'ator-1');
+
+    const bruto = JSON.stringify(captura.linhas());
+    expect(bruto).not.toContain(criado.segredo);
+    expect(bruto).not.toContain(rotacionado.segredo);
+    expect(bruto).not.toContain('scrypt$');
+    expect(bruto).not.toContain('secret_hash');
   });
 });
