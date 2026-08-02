@@ -2,7 +2,7 @@
 
 # ---- build: tem o toolchain, instala tudo e compila ----
 # Base pinada por digest: a tag 22-alpine é mutável e tornaria o build não reproduzível.
-FROM node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2 AS build
+FROM node:26-alpine@sha256:233761595746769ebfdb6090f44fc7cdf818ae0ce62d2b37e0367723b9823e36 AS build
 WORKDIR /app
 
 # corepack resolve a versão fixada em packageManager — sem isso o pnpm do container
@@ -33,7 +33,7 @@ RUN node -e "const p=require('./package.json'); \
     JSON.stringify({ name: p.name, version: p.version, type: p.type, private: true }, null, 2))"
 
 # ---- runtime: mínimo, sem toolchain, não-root ----
-FROM node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2 AS runtime
+FROM node:26-alpine@sha256:233761595746769ebfdb6090f44fc7cdf818ae0ce62d2b37e0367723b9823e36 AS runtime
 
 # Commit da imagem, publicado como rótulo de iam_build_info. Sem ele, a métrica que existe
 # para dizer "qual versão estava rodando" diria "desconhecido" — inútil justamente durante
