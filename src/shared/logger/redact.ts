@@ -31,6 +31,15 @@ const CAMPOS_SENSIVEIS = [
   'privateKey',
   'master_key',
   'd',
+  // Credenciais de cliente de API. O segredo em claro só existe na resposta que o entrega,
+  // mas o corpo da requisição de autenticação o carrega, e o hash no log seria material
+  // suficiente para atacar offline o que o scrypt protege em repouso.
+  'client_secret',
+  'clientSecret',
+  'secret_hash',
+  'secretHash',
+  'previous_secret_hash',
+  'previousSecretHash',
 ] as const;
 
 /** Monta os caminhos de censura para o Pino a partir dos campos sensíveis. */

@@ -28,6 +28,11 @@ tags:
     description: Login, logout e perfil do usuário autenticado.
   - name: rbac
     description: Papéis, permissões e suas associações. Autorização por permissão (guard).
+  - name: clients
+    description: >-
+      Clientes de API — a identidade de uma aplicação, não de uma pessoa. O escopo concedido
+      é o nome de uma permissão do catálogo do RBAC, então o mesmo guard autoriza token de
+      usuário e token de cliente.
   - name: abac
     description: >-
       Políticas por atributo sobre o RBAC. A decisão é sempre server-side (PDP/PEP) e nunca
@@ -200,6 +205,64 @@ components:
         status: { type: string, enum: [active, blocked] }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    ApiClient:
+      type: object
+      # additionalProperties: false é a garantia de contrato de que nenhum campo de segredo
+      # escapa por esta rota — não é só estilo.
+      additionalProperties: false
+      required:
+        [
+          id,
+          client_id,
+          name,
+          description,
+          status,
+          scopes,
+          grant_types,
+          access_token_ttl_seconds,
+          created_at,
+          updated_at,
+          last_used_at,
+          secret_rotated_at,
+          previous_secret_expires_at,
+        ]
+      properties:
+        id: { type: string, format: uuid }
+        client_id: { type: string, description: 'Identificador público, prefixado por cli_.' }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        status: { type: string, enum: [active, disabled, deleted] }
+        scopes:
+          type: array
+          items: { type: string }
+          description: Nomes de permissão do catálogo concedidos a este cliente.
+        grant_types:
+          type: array
+          items: { type: string, enum: [client_credentials, password, refresh_token] }
+        access_token_ttl_seconds:
+          type: integer
+          nullable: true
+          description: Nulo usa o TTL global de access token.
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        last_used_at: { type: string, format: date-time, nullable: true }
+        secret_rotated_at: { type: string, format: date-time, nullable: true }
+        previous_secret_expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Até quando o segredo anterior ainda autentica.
+    ApiClientCreated:
+      allOf:
+        - $ref: '#/components/schemas/ApiClient'
+        - type: object
+          required: [client_secret]
+          properties:
+            client_secret:
+              type: string
+              description: >-
+                Segredo em claro. Aparece nesta resposta e na rotação, e em nenhum outro
+                lugar — não há endpoint para recuperá-lo.
     KeyMetadata:
       type: object
       # additionalProperties: false é a garantia de contrato de que nenhum campo de material
@@ -229,6 +292,15 @@ components:
           nullable: true
           description: Instante em que a chave deixa de verificar tokens.
         age_seconds: { type: integer, minimum: 0 }
+    ApiClientList:
+      type: object
+      additionalProperties: false
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ApiClient' }
+        total: { type: integer }
     KeyList:
       type: object
       additionalProperties: false
@@ -238,6 +310,19 @@ components:
           type: array
           items: { $ref: '#/components/schemas/KeyMetadata' }
         total: { type: integer }
+    RotatedSecret:
+      type: object
+      additionalProperties: false
+      required: [client_id, client_secret, secret_rotated_at, previous_secret_expires_at]
+      properties:
+        client_id: { type: string }
+        client_secret: { type: string, description: 'Segredo novo em claro, exibido uma vez.' }
+        secret_rotated_at: { type: string, format: date-time }
+        previous_secret_expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Nulo quando a rotação foi pedida sem janela de sobreposição.
     PreparedKey:
       type: object
       additionalProperties: false
@@ -1503,6 +1588,208 @@ paths:
         - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
       responses:
         '204': { description: Removida }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+        '404': { $ref: '#/components/responses/ProblemNaoEncontrado' }
+        '409': { $ref: '#/components/responses/ProblemConflito' }
+  /clients:
+    post:
+      tags: [clients]
+      summary: Cria um cliente de API
+      description: >-
+        Exige o papel `superadmin`: conceder escopo é conceder privilégio. O `client_id` e o
+        `client_secret` são gerados pelo servidor; o segredo aparece só nesta resposta.
+      operationId: clientsCreate
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, scopes]
+              properties:
+                name: { type: string, minLength: 2, maxLength: 128 }
+                description: { type: string, maxLength: 256 }
+                scopes:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items: { type: string, pattern: '^[a-z0-9_-]+:[a-z0-9_-]+$' }
+                grant_types:
+                  type: array
+                  minItems: 1
+                  items: { type: string, enum: [client_credentials, password, refresh_token] }
+                access_token_ttl_seconds: { type: integer, minimum: 60, maximum: 3600 }
+      responses:
+        '201':
+          description: Cliente criado, com o segredo em claro
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiClientCreated' }
+        '400': { $ref: '#/components/responses/ProblemValidacao' }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+        '409': { $ref: '#/components/responses/ProblemConflito' }
+        '422':
+          description: Escopo desconhecido; o detail lista quais faltaram
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+    get:
+      tags: [clients]
+      summary: Lista clientes de API
+      description: Exige `clients:read`. Removidos ficam fora por padrão.
+      operationId: clientsList
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { in: query, name: status, schema: { type: string, enum: [active, disabled, deleted] } }
+        - {
+            in: query,
+            name: limit,
+            schema: { type: integer, minimum: 1, maximum: 100, default: 50 },
+          }
+        - { in: query, name: offset, schema: { type: integer, minimum: 0, default: 0 } }
+      responses:
+        '200':
+          description: Página de clientes
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiClientList' }
+        '400': { $ref: '#/components/responses/ProblemValidacao' }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+  /clients/{id}:
+    get:
+      tags: [clients]
+      summary: Detalha um cliente de API
+      description: Exige `clients:read`. Nunca devolve segredo nem hash.
+      operationId: clientsGet
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Cliente
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiClient' }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+        '404': { $ref: '#/components/responses/ProblemNaoEncontrado' }
+    patch:
+      tags: [clients]
+      summary: Altera um cliente de API
+      description: >-
+        Autoridade por campo. `name`, `description` e `status` exigem `clients:write`;
+        `scopes`, `grant_types` e `access_token_ttl_seconds` exigem o papel `superadmin`.
+        Corpo que mistura os dois grupos é tratado como privilegiado inteiro: sem
+        `superadmin`, responde 403 sem aplicar nada.
+      operationId: clientsUpdate
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              minProperties: 1
+              properties:
+                name: { type: string, minLength: 2, maxLength: 128 }
+                description: { type: string, maxLength: 256, nullable: true }
+                status: { type: string, enum: [active, disabled] }
+                scopes:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items: { type: string, pattern: '^[a-z0-9_-]+:[a-z0-9_-]+$' }
+                grant_types:
+                  type: array
+                  minItems: 1
+                  items: { type: string, enum: [client_credentials, password, refresh_token] }
+                access_token_ttl_seconds:
+                  { type: integer, minimum: 60, maximum: 3600, nullable: true }
+      responses:
+        '200':
+          description: Cliente atualizado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiClient' }
+        '400': { $ref: '#/components/responses/ProblemValidacao' }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+        '404': { $ref: '#/components/responses/ProblemNaoEncontrado' }
+        '409': { $ref: '#/components/responses/ProblemConflito' }
+        '422':
+          description: Escopo desconhecido
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+    delete:
+      tags: [clients]
+      summary: Remove um cliente de API
+      description: >-
+        Exige `clients:delete`. Remoção lógica: o `client_id` fica queimado e a autenticação
+        passa a negar imediatamente.
+      operationId: clientsDelete
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: Removido }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+        '404': { $ref: '#/components/responses/ProblemNaoEncontrado' }
+        '409': { $ref: '#/components/responses/ProblemConflito' }
+  /clients/{id}/secret:
+    post:
+      tags: [clients]
+      summary: Rotaciona o segredo do cliente
+      description: >-
+        Exige `clients:write`. O segredo anterior continua aceito durante a janela de
+        sobreposição, para o cliente trocar sem downtime durante o deploy. `overlap_seconds`
+        zero encerra o anterior no ato.
+      operationId: clientsRotateSecret
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                overlap_seconds: { type: integer, minimum: 0, maximum: 604800 }
+      responses:
+        '200':
+          description: Segredo rotacionado, com o novo valor em claro
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RotatedSecret' }
+        '400': { $ref: '#/components/responses/ProblemValidacao' }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+        '404': { $ref: '#/components/responses/ProblemNaoEncontrado' }
+        '409': { $ref: '#/components/responses/ProblemConflito' }
+  /clients/{id}/secret/revoke-previous:
+    post:
+      tags: [clients]
+      summary: Encerra a sobreposição de segredo
+      description: >-
+        Exige `clients:write`. O caminho de incidente, para quando o segredo antigo vazou e
+        não se pode esperar a janela fechar sozinha.
+      operationId: clientsRevokePreviousSecret
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: Sobreposição encerrada }
         '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
         '403': { $ref: '#/components/responses/ProblemSemPermissao' }
         '404': { $ref: '#/components/responses/ProblemNaoEncontrado' }
