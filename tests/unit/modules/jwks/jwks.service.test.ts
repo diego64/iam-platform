@@ -163,7 +163,11 @@ describe('métrica', () => {
   it('registra a contagem por estado a cada carga', async () => {
     const { repo } = repoFake([await novaChave('active'), await novaChave('next')]);
     const registrarContagem = vi.fn();
-    const service = criarJwksService(config(repo, { medidor: { registrarContagem } }));
+    const service = criarJwksService(
+      config(repo, {
+        medidor: { registrarContagem, contarRotacao: vi.fn(), registrarIdadeDaAtiva: vi.fn() },
+      }),
+    );
 
     await service.obterConjuntoPublico();
     expect(registrarContagem).toHaveBeenCalledWith({ active: 1, next: 1, retired: 0 });

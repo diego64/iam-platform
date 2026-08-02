@@ -14,12 +14,22 @@ const ESCOPO = 'iam-platform';
 
 export interface MedidorDeJwks {
   registrarContagem(contagem: Record<StatusDaChave, number>): void;
+  /** Conta uma promoção concluída, rotulada pelo que a motivou. */
+  contarRotacao(motivo: string): void;
+  /** Idade da chave que assina agora — alimenta o alerta de chave velha demais. */
+  registrarIdadeDaAtiva(segundos: number | null): void;
 }
 
 export function criarMedidorDeJwks(): MedidorDeJwks {
   const meter = metrics.getMeter(ESCOPO);
   const chaves = meter.createGauge('iam_jwks_keys', {
     description: 'Quantidade de chaves de assinatura por estado',
+  });
+  const rotacoes = meter.createCounter('iam_jwks_rotations_total', {
+    description: 'Promoções de chave concluídas, por motivo',
+  });
+  const idadeDaAtiva = meter.createGauge('iam_jwks_active_key_age_seconds', {
+    description: 'Há quantos segundos a chave ativa assina',
   });
 
   return {
@@ -28,6 +38,18 @@ export function criarMedidorDeJwks(): MedidorDeJwks {
       chaves.record(contagem.next, { status: 'next' });
       chaves.record(contagem.retired, { status: 'retired' });
     },
+
+    contarRotacao(motivo) {
+      rotacoes.add(1, { motivo });
+    },
+
+    registrarIdadeDaAtiva(segundos) {
+      // Sem chave ativa não há idade a informar: gravar zero mentiria que a chave é nova,
+      // que é o oposto do que o alerta procura.
+      if (segundos !== null) {
+        idadeDaAtiva.record(segundos);
+      }
+    },
   };
 }
 
@@ -35,6 +57,12 @@ export function criarMedidorDeJwks(): MedidorDeJwks {
 export function medidorDeJwksNulo(): MedidorDeJwks {
   return {
     registrarContagem() {
+      /* no-op */
+    },
+    contarRotacao() {
+      /* no-op */
+    },
+    registrarIdadeDaAtiva() {
       /* no-op */
     },
   };
