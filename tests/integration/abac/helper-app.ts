@@ -8,7 +8,7 @@
  * O `GET /users/:id` registrado aqui é o proving ground de posse: a mesma rota existe no
  * módulo de usuários sem o guard de política, e é aqui que ela ganha `exigirPolitica`. O
  * mount em produção (`construirApp`) segue adiado como gap conhecido do projeto, igual ao
- * das SPECs 001–003.
+ * dos módulos de autenticação, usuários e RBAC.
  */
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import {

@@ -1,10 +1,10 @@
 /**
- * Não-regressão de RF-10: o ABAC não entra no Access Token.
+ * Não-regressão: a decisão por atributo não entra no Access Token.
  *
  * A tentação de embarcar a decisão por atributo no token é permanente — resolveria a
  * latência e serviria o consumidor offline. Mas uma condição sobre `resource.owner_id`
  * precisa do recurso em mãos, que a emissão não tem. Este teste trava o contrato de claims
- * no que as SPECs 001 e 003 definiram: quem acrescentar uma claim de política ao token
+ * no que autenticação e RBAC definiram: quem acrescentar uma claim de política ao token
  * quebra aqui e tem de justificar a mudança de decisão, não passar por descuido.
  */
 import { describe, expect, it } from 'vitest';

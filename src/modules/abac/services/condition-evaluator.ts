@@ -38,7 +38,11 @@ function ehObjetoPlano(valor: unknown): valor is Record<string, unknown> {
   return typeof valor === 'object' && valor !== null && !Array.isArray(valor);
 }
 
-/** Raiz endereçável pelos caminhos das condições — exatamente os atributos de RF-05. */
+/**
+ * Raiz endereçável pelos caminhos das condições. São só estes quatro ramos: sujeito (os
+ * claims do token), recurso (o que a rota carregou), ação e ambiente. O que não está aqui
+ * não é endereçável por política.
+ */
 function raizDoContexto(contexto: ContextoDeDecisao): Record<string, unknown> {
   return {
     subject: contexto.subject,

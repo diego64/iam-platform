@@ -27,7 +27,7 @@ export type GuardDePolitica = (requisicao: FastifyRequest, resposta: FastifyRepl
 
 export interface DependenciasDoPep {
   readonly motor: Pick<MotorDePoliticas, 'avaliar'>;
-  /** Registra a decisão (RF-12). Opcional para manter o guard testável sem logger. */
+  /** Registra a decisão para auditoria. Opcional para manter o guard testável sem logger. */
   readonly registrarDecisao?: (registro: {
     sujeito_id: string;
     resource_type: string;

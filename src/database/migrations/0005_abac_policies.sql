@@ -1,5 +1,5 @@
--- SPEC 004 — ABAC: tabela de políticas, permissões que governam sua administração e a
--- política de sistema de posse. Toda instrução é idempotente (IF NOT EXISTS / ON CONFLICT),
+-- Autorização por atributo: tabela de políticas, as permissões que governam sua
+-- administração e as políticas de sistema. Toda instrução é idempotente (IF NOT EXISTS / ON CONFLICT),
 -- para o migrate poder reaplicar sem erro e para o seed nunca duplicar.
 
 CREATE TABLE IF NOT EXISTS policies (

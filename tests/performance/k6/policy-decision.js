@@ -1,6 +1,6 @@
 // PDP sob carga: `POST /policies/evaluate` decide sobre atributos informados no corpo, sem
-// carregar recurso do banco. É a medida do RNF-01 — a decisão em si, isolada do I/O que o
-// guard faz em `carregarRecurso` (esse é o RNF-02, com teto bem mais folgado, 20ms).
+// carregar recurso do banco. Mede a decisão em si, isolada do I/O que o guard faz em
+// `carregarRecurso` — esse caminho tem orçamento de latência próprio, bem mais folgado.
 //
 // O cache do PDP tem TTL curto, então dentro da janela a decisão não toca o Postgres: o que
 // sobra no tempo é o casamento textual da condição sobre o contexto. Se este p95 subir, o

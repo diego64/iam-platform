@@ -54,7 +54,7 @@ beforeAll(async () => {
   const montado = await montarAppDeAbac({ pool, banco });
   app = montado.app;
 
-  // `users:read` não está no seed do RBAC (é permissão da SPEC 002): criamos aqui para que
+  // `users:read` não está no seed do RBAC (pertence ao módulo de usuários): criamos aqui para que
   // o terceiro passe pelo guard grosso e o 403 venha comprovadamente do ABAC.
   await pool.query("INSERT INTO permissions (name) VALUES ('users:read') ON CONFLICT DO NOTHING");
   const { rows: papel } = await pool.query<{ id: string }>(
@@ -158,8 +158,8 @@ describe('sem política aplicável', () => {
     const headers = await logar(DONO);
     await pool.query('UPDATE policies SET enabled = false WHERE is_system');
     try {
-      // A escrita foi direta no banco (simula outro processo): esperar o TTL do cache é o
-      // que o RNF-05 promete, então forçamos a releitura zerando a janela.
+      // A escrita foi direta no banco, simulando outro processo: aí não há `invalidar()` a
+      // chamar, e a mudança só passa a valer quando a janela de staleness do cache fecha.
       await new Promise((r) => setTimeout(r, 5_100));
       const res = await app.inject({ method: 'GET', url: `/users/${idDoDono}`, headers });
       expect(res.statusCode).toBe(403);

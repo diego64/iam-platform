@@ -1,7 +1,8 @@
 /**
  * A gramática da condição é a fronteira entre "dado administrável" e "superfície de
  * execução". Este teste fixa o que ela aceita e, principalmente, o que recusa: operador
- * fora da whitelist, campo extra e árvore além dos limites de forma (anti-DoS, RF-11).
+ * fora da whitelist, campo extra e árvore além dos limites de forma — condição gigante é
+ * vetor de negação de serviço, e ela é recusada antes de chegar ao banco.
  */
 import { describe, expect, it } from 'vitest';
 import { condicaoSchema } from '../../../../src/modules/abac/schemas/condition.schema.js';

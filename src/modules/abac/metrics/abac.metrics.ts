@@ -8,7 +8,8 @@
  *    declarados nas rotas) — nunca id de sujeito, de recurso ou valor de atributo, senão a
  *    cardinalidade explode e a série passa a carregar dado de usuário.
  *  - A duração mede só a avaliação, sem o I/O de `carregarRecurso`: misturar os dois
- *    esconderia o custo do PDP atrás da latência do banco (RNF-01 × RNF-02).
+ *    esconderia o custo da decisão atrás da latência do banco, e são dois orçamentos de
+ *    latência diferentes: a avaliação tem teto de milissegundos, a carga do recurso não.
  */
 import { metrics } from '@opentelemetry/api';
 import type { Efeito } from '../types/abac.types.js';

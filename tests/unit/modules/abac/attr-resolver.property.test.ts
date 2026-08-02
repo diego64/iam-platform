@@ -1,11 +1,11 @@
 /**
- * Fuzz do resolvedor de atributo (RNF-06). Caminhos vêm de política — dado administrável —
+ * Fuzz do resolvedor de atributo. Caminhos vêm de política — dado administrável —
  * então a propriedade que precisa valer para *qualquer* entrada é dupla: nunca lançar (uma
  * exceção viraria 500 no meio da autorização) e nunca devolver algo alcançado pela cadeia de
  * protótipos (um `constructor` resolvido seria a porta da poluição de protótipo).
  *
- * Sem biblioteca de property testing: o gerador abaixo é um punhado de linhas e a SPEC não
- * lista dependência nova.
+ * Sem biblioteca de property testing: o gerador abaixo é um punhado de linhas, e não vale
+ * uma dependência nova.
  */
 import { describe, expect, it } from 'vitest';
 import { resolverAtributo } from '../../../../src/modules/abac/services/condition-evaluator.js';
