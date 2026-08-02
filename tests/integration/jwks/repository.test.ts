@@ -47,7 +47,7 @@ afterAll(async () => {
   await pool.end();
 });
 
-describe('índice único parcial (jwks_one_active)', () => {
+describe('índices únicos parciais (jwks_one_active, jwks_one_next)', () => {
   it('impede uma segunda chave active', async () => {
     await repo.inserir(await novaEntrada('active'));
     await expect(repo.inserir(await novaEntrada('active'))).rejects.toMatchObject({
@@ -55,11 +55,19 @@ describe('índice único parcial (jwks_one_active)', () => {
     });
   });
 
-  it('permite várias chaves next/retired', async () => {
+  // A rotação promove `next → active` sem escolher entre candidatas: só existe uma.
+  it('impede uma segunda chave next', async () => {
     await repo.inserir(await novaEntrada('next'));
+    await expect(repo.inserir(await novaEntrada('next'))).rejects.toMatchObject({
+      code: '23505',
+    });
+  });
+
+  it('permite várias chaves retired — cada rotação aposenta mais uma', async () => {
     await repo.inserir(await novaEntrada('next'));
     await repo.inserir(await novaEntrada('retired'));
-    expect(await repo.contarPorStatus()).toMatchObject({ next: 2, retired: 1 });
+    await repo.inserir(await novaEntrada('retired'));
+    expect(await repo.contarPorStatus()).toMatchObject({ next: 1, retired: 2 });
   });
 });
 
