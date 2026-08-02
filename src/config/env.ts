@@ -128,6 +128,49 @@ export const esquemaEnv = z.object({
     .max(60 * 60 * 1000)
     .default(5 * 60 * 1000),
 
+  // Tempo mínimo que a chave pré-publicada precisa ficar visível no JWKS antes de poder
+  // assinar. Default 10 min = o teto de defasagem do cache interno das réplicas (5 min)
+  // somado ao `max-age` que o endpoint JWKS manda para o cache dos consumidores (5 min).
+  // Promover antes disso faria consumidores rejeitarem tokens de um `kid` que ainda não
+  // conhecem — exatamente o downtime que a rotação em duas fases existe para evitar.
+  JWKS_PREPUBLISH_MIN_MS: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .max(24 * 60 * 60 * 1000)
+    .default(10 * 60 * 1000),
+
+  // Idade a partir da qual a chave ativa é rotacionada sozinha.
+  JWKS_ROTATION_MAX_AGE_MS: z.coerce
+    .number()
+    .int()
+    .min(60 * 1000)
+    .max(365 * 24 * 60 * 60 * 1000)
+    .default(30 * 24 * 60 * 60 * 1000),
+
+  // De quanto em quanto tempo cada réplica verifica se é hora de rotacionar. Só uma delas
+  // age por ciclo — a exclusão é por advisory lock no próprio PostgreSQL.
+  JWKS_ROTATION_CHECK_INTERVAL_MS: z.coerce
+    .number()
+    .int()
+    .min(1000)
+    .max(24 * 60 * 60 * 1000)
+    .default(60 * 60 * 1000),
+
+  // Margem após o fim da verificabilidade antes de a linha ser apagada de vez. Mantém a
+  // chave por muito mais tempo do que ela é útil, para que "que chave assinou este token
+  // de ontem?" ainda tenha resposta durante uma investigação.
+  JWKS_PURGE_AFTER_MS: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .max(90 * 24 * 60 * 60 * 1000)
+    .default(24 * 60 * 60 * 1000),
+
+  // Liga o agendador de rotação. Desligado, prepare/rotate continuam disponíveis pela API
+  // administrativa — só não acontecem sozinhos.
+  JWKS_ROTATION_ENABLED: booleanoDeAmbiente(true),
+
   // Emissão de token de acesso: emissor, audiência e TTL do access token (segundos).
   // O TTL casa com a janela de graça do JWKS — nenhum token válido fica sem chave.
   JWT_ISSUER: z.string().url().default('https://iam.example.com'),
@@ -278,15 +321,46 @@ function traduzirProblemas(erro: z.ZodError): ProblemaDeVariavel[] {
 }
 
 /**
+ * Checagens que envolvem mais de uma variável — o Zod valida cada uma isoladamente e não
+ * enxerga relações entre elas.
+ *
+ * O cache do conjunto de chaves precisa expirar **antes** da janela de graça. Durante uma
+ * rotação, a réplica que ainda não recarregou o cache continua assinando com a chave que
+ * outra réplica acabou de aposentar; esses tokens só continuam verificáveis enquanto a
+ * chave aposentada estiver na graça. Com o cache vivendo mais que a graça, a rotação passa
+ * a emitir tokens natimortos — e é uma relação entre duas variáveis independentes, o tipo
+ * de configuração que ninguém revisa. Daí ser gate de boot, e não comentário no
+ * .env.example.
+ */
+export function validarCoerencia(env: Env): ProblemaDeVariavel[] {
+  const problemas: ProblemaDeVariavel[] = [];
+
+  if (env.JWKS_CACHE_TTL_MS >= env.JWKS_GRACE_PERIOD_MS) {
+    problemas.push({
+      nome: 'JWKS_CACHE_TTL_MS',
+      problema: 'precisa ser menor que JWKS_GRACE_PERIOD_MS (rotação sem downtime)',
+    });
+  }
+
+  return problemas;
+}
+
+/**
  * Valida a fonte informada e devolve a configuração congelada.
  * Recebe a fonte por parâmetro para ser testável sem mexer no process.env global.
- * @throws {ErroDeConfiguracao} quando qualquer variável está ausente ou malformada.
+ * @throws {ErroDeConfiguracao} quando qualquer variável está ausente, malformada ou
+ *         incoerente com outra.
  */
 export function carregarEnv(fonte: NodeJS.ProcessEnv = process.env): Env {
   const resultado = esquemaEnv.safeParse(fonte);
 
   if (!resultado.success) {
     throw new ErroDeConfiguracao(traduzirProblemas(resultado.error));
+  }
+
+  const incoerencias = validarCoerencia(resultado.data);
+  if (incoerencias.length > 0) {
+    throw new ErroDeConfiguracao(incoerencias);
   }
 
   return Object.freeze(resultado.data);

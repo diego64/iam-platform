@@ -27,6 +27,7 @@ async function novaChave(status: StatusDaChave): Promise<ChaveJwks> {
     criadaEm: new Date(),
     ativadaEm: status === 'active' ? new Date() : null,
     aposentadaEm: null,
+    verificavelAte: null,
   };
 }
 
@@ -34,11 +35,17 @@ function repoFake(chaves: ChaveJwks[]): { repo: RepositorioJwks; chamadasElegive
   let chamadas = 0;
   const repo: RepositorioJwks = {
     inserir: () => Promise.reject(new Error('não usado')),
+    rotacionar: () => Promise.reject(new Error('não usado')),
+    revogar: () => Promise.reject(new Error('não usado')),
+    purgar: () => Promise.reject(new Error('não usado')),
+    obterMetadadosPorKid: () => Promise.resolve(null),
     listarElegiveis: () => {
       chamadas += 1;
       return Promise.resolve(chaves);
     },
+    listarMetadados: () => Promise.resolve(chaves),
     obterAtiva: () => Promise.resolve(chaves.find((c) => c.status === 'active') ?? null),
+    obterProxima: () => Promise.resolve(chaves.find((c) => c.status === 'next') ?? null),
     contarPorStatus: () =>
       Promise.resolve({
         active: chaves.filter((c) => c.status === 'active').length,
@@ -50,7 +57,7 @@ function repoFake(chaves: ChaveJwks[]): { repo: RepositorioJwks; chamadasElegive
 }
 
 function config(repo: RepositorioJwks, extra: Partial<ConfiguracaoJwks> = {}): ConfiguracaoJwks {
-  return { repo, masterKey: MASTER, graceMs: 900_000, cacheTtlMs: 300_000, ...extra };
+  return { repo, masterKey: MASTER, cacheTtlMs: 300_000, ...extra };
 }
 
 describe('cache', () => {
@@ -138,7 +145,6 @@ describe('fail closed no boot', () => {
     const { repo } = repoFake([await novaChave('active')]);
     const service = criarJwksService({
       repo,
-      graceMs: 900_000,
       cacheTtlMs: 300_000,
     });
 
@@ -157,7 +163,11 @@ describe('métrica', () => {
   it('registra a contagem por estado a cada carga', async () => {
     const { repo } = repoFake([await novaChave('active'), await novaChave('next')]);
     const registrarContagem = vi.fn();
-    const service = criarJwksService(config(repo, { medidor: { registrarContagem } }));
+    const service = criarJwksService(
+      config(repo, {
+        medidor: { registrarContagem, contarRotacao: vi.fn(), registrarIdadeDaAtiva: vi.fn() },
+      }),
+    );
 
     await service.obterConjuntoPublico();
     expect(registrarContagem).toHaveBeenCalledWith({ active: 1, next: 1, retired: 0 });

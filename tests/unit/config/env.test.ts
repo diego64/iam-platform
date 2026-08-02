@@ -332,3 +332,73 @@ describe('carregarEnv — clientes de API', () => {
     expect(erro.variaveis.map((v) => v.nome)).toContain('CLIENT_LAST_USED_THROTTLE_MS');
   });
 });
+
+describe('carregarEnv — rotação de chaves', () => {
+  it('aplica os defaults da rotação', () => {
+    const env = carregarEnv(fonteValida());
+
+    expect(env.JWKS_PREPUBLISH_MIN_MS).toBe(600_000);
+    expect(env.JWKS_ROTATION_MAX_AGE_MS).toBe(2_592_000_000);
+    expect(env.JWKS_ROTATION_CHECK_INTERVAL_MS).toBe(3_600_000);
+    expect(env.JWKS_PURGE_AFTER_MS).toBe(86_400_000);
+    expect(env.JWKS_ROTATION_ENABLED).toBe(true);
+  });
+
+  it('coage os valores informados e aceita desligar o agendador', () => {
+    const env = carregarEnv(
+      fonteValida({
+        JWKS_PREPUBLISH_MIN_MS: '1000',
+        JWKS_ROTATION_MAX_AGE_MS: '90000',
+        JWKS_ROTATION_ENABLED: 'false',
+      }),
+    );
+
+    expect(env.JWKS_PREPUBLISH_MIN_MS).toBe(1000);
+    expect(env.JWKS_ROTATION_MAX_AGE_MS).toBe(90_000);
+    expect(env.JWKS_ROTATION_ENABLED).toBe(false);
+  });
+
+  it('rejeita intervalo de verificação abaixo do mínimo', () => {
+    const erro = capturarErro(fonteValida({ JWKS_ROTATION_CHECK_INTERVAL_MS: '10' }));
+
+    expect(erro.variaveis.map((v) => v.nome)).toContain('JWKS_ROTATION_CHECK_INTERVAL_MS');
+  });
+});
+
+describe('carregarEnv — coerência entre cache e janela de graça', () => {
+  // A réplica com cache velho assina com a chave recém-aposentada; o token só é
+  // verificável enquanto ela estiver na graça. Cache >= graça emite token natimorto.
+  it('aceita cache menor que a janela de graça', () => {
+    const env = carregarEnv(
+      fonteValida({ JWKS_CACHE_TTL_MS: '299999', JWKS_GRACE_PERIOD_MS: '300000' }),
+    );
+
+    expect(env.JWKS_CACHE_TTL_MS).toBeLessThan(env.JWKS_GRACE_PERIOD_MS);
+  });
+
+  it('rejeita cache igual à janela de graça', () => {
+    const erro = capturarErro(
+      fonteValida({ JWKS_CACHE_TTL_MS: '300000', JWKS_GRACE_PERIOD_MS: '300000' }),
+    );
+
+    expect(erro.variaveis).toEqual([
+      {
+        nome: 'JWKS_CACHE_TTL_MS',
+        problema: 'precisa ser menor que JWKS_GRACE_PERIOD_MS (rotação sem downtime)',
+      },
+    ]);
+  });
+
+  it('rejeita cache maior que a janela de graça', () => {
+    const erro = capturarErro(
+      fonteValida({ JWKS_CACHE_TTL_MS: '600000', JWKS_GRACE_PERIOD_MS: '300000' }),
+    );
+
+    expect(erro.variaveis.map((v) => v.nome)).toEqual(['JWKS_CACHE_TTL_MS']);
+  });
+
+  it('os defaults do schema são coerentes entre si', () => {
+    // Guarda contra alguém baixar a graça ou subir o cache no schema sem notar o par.
+    expect(() => carregarEnv(fonteValida())).not.toThrow();
+  });
+});
