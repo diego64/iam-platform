@@ -27,6 +27,15 @@ async function migrar(dryRun: boolean): Promise<void> {
   const logger = criarLogger({ nivel: env.LOG_LEVEL });
   const pool = criarPoolPostgres(env);
 
+  // Teto para espera por lock. Sem ele, um DDL travado atrás de transação aberta (instância
+  // antiga ainda no ar, tentativa de deploy anterior pendurada) espera indefinidamente: o
+  // processo fica vivo, o servidor nunca é iniciado e a plataforma derruba o deploy por
+  // não achar porta aberta — sem nenhum erro que explique o quê. Falhar em 10s expõe o
+  // bloqueio no log e deixa o deploy morrer por motivo legível.
+  pool.on('connect', (cliente) => {
+    void cliente.query("SET lock_timeout = '10s'");
+  });
+
   try {
     // Tabela de controle: sem ela não há como saber o que já rodou. IF NOT EXISTS fora de
     // transação para não brigar com o CREATE das próprias migrations.
