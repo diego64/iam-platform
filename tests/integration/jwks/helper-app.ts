@@ -26,6 +26,7 @@ import {
   criarRepositorioJwks,
   criarJwksService,
   garantirChaveDeBootstrap,
+  registrarRotasDeJwks,
   type RepositorioJwks,
 } from '../../../src/modules/jwks/index.js';
 import { criarKeyRotationService } from '../../../src/modules/jwks/services/key-rotation.service.js';
@@ -123,6 +124,9 @@ export async function montarAppDeChaves(opcoes: {
     audiencia: AUDIENCIA,
   });
 
+  // O endpoint público entra junto: é por ele que o teste observa o efeito da rotação no
+  // conjunto que os consumidores enxergam.
+  registrarRotasDeJwks(app, { jwks });
   registrarRotasDeAuth(app, { authService, verificarAccessToken });
   registrarRotasDeChaves(app, {
     rotacao,
