@@ -35,6 +35,7 @@ function repoFake(chaves: ChaveJwks[]): { repo: RepositorioJwks; chamadasElegive
   let chamadas = 0;
   const repo: RepositorioJwks = {
     inserir: () => Promise.reject(new Error('não usado')),
+    rotacionar: () => Promise.reject(new Error('não usado')),
     listarElegiveis: () => {
       chamadas += 1;
       return Promise.resolve(chaves);
