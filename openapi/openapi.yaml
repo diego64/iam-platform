@@ -23,6 +23,10 @@ tags:
     description: Login, logout e perfil do usuário autenticado.
   - name: rbac
     description: Papéis, permissões e suas associações. Autorização por permissão (guard).
+  - name: abac
+    description: >-
+      Políticas por atributo sobre o RBAC. A decisão é sempre server-side (PDP/PEP) e nunca
+      entra no token: uma condição sobre o recurso precisa do recurso em mãos.
 servers:
   - url: http://localhost:3000
     description: Desenvolvimento local
@@ -251,6 +255,64 @@ components:
             properties:
               id: { type: string, format: uuid }
               name: { type: string }
+    PolicyCondition:
+      description: >-
+        Condição na gramática fechada: operadores whitelisted, sem regex e sem execução de
+        dado. Limites de forma — profundidade <= 10 e <= 100 nós — recusados com 400 na borda.
+      type: object
+      required: [op]
+      properties:
+        op:
+          type: string
+          enum: [and, or, not, eq, ne, gt, gte, lt, lte, in, contains]
+        attr:
+          description: Caminho no contexto (subject.*, resource.*, action, env.*).
+          type: string
+          maxLength: 128
+        value:
+          description: Literal, lista de literais (`in`) ou `{ ref }` apontando outro atributo.
+        of:
+          description: Filhos dos operadores lógicos.
+          type: array
+          items: { $ref: '#/components/schemas/PolicyCondition' }
+    Policy:
+      type: object
+      required: [id, name, effect, resource_type, action, priority, enabled, is_system]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        effect: { type: string, enum: [permit, deny] }
+        resource_type: { type: string }
+        action: { type: string }
+        priority: { type: integer }
+        enabled: { type: boolean }
+        is_system: { type: boolean }
+    PolicyDetail:
+      allOf:
+        - $ref: '#/components/schemas/Policy'
+        - type: object
+          required: [description, condition]
+          properties:
+            description: { type: string, nullable: true }
+            condition: { $ref: '#/components/schemas/PolicyCondition' }
+    PolicyList:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Policy' }
+        total: { type: integer }
+    PolicyDecision:
+      type: object
+      required: [effect, reason]
+      properties:
+        effect: { type: string, enum: [permit, deny] }
+        policy_id:
+          description: Política decisiva. Ausente quando nenhuma política aplicável foi satisfeita.
+          type: string
+          format: uuid
+        reason: { type: string, enum: [matched, no-applicable-policy] }
   securitySchemes:
     BearerAuth:
       type: http
@@ -1193,3 +1255,177 @@ paths:
         '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
         '403': { $ref: '#/components/responses/ProblemSemPermissao' }
         '404': { $ref: '#/components/responses/ProblemNaoEncontrado' }
+  /policies:
+    post:
+      tags: [abac]
+      summary: Cria uma política
+      description: >-
+        Exige `policies:write`. A condição é validada contra a gramática fechada e contra os
+        limites de forma antes de persistir; fora deles, 400 e nada é gravado.
+      operationId: policiesCreate
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, effect, resource_type, action, condition]
+              properties:
+                name: { type: string, minLength: 2, maxLength: 64, pattern: '^[a-z0-9_-]+$' }
+                description: { type: string, maxLength: 256 }
+                effect: { type: string, enum: [permit, deny] }
+                resource_type: { type: string, minLength: 1, maxLength: 64 }
+                action: { type: string, minLength: 1, maxLength: 64 }
+                condition: { $ref: '#/components/schemas/PolicyCondition' }
+                priority: { type: integer, minimum: 0, maximum: 1000, default: 0 }
+                enabled: { type: boolean, default: true }
+      responses:
+        '201':
+          description: Criada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Policy' }
+        '400': { $ref: '#/components/responses/ProblemValidacao' }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+        '409': { $ref: '#/components/responses/ProblemConflito' }
+    get:
+      tags: [abac]
+      summary: Lista políticas
+      description: Exige `policies:read`. Ordena por prioridade decrescente.
+      operationId: policiesList
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { in: query, name: resource_type, schema: { type: string, maxLength: 64 } }
+        - { in: query, name: enabled, schema: { type: boolean } }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - { in: query, name: offset, schema: { type: integer, minimum: 0, default: 0 } }
+      responses:
+        '200':
+          description: Página de políticas
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PolicyList' }
+        '400': { $ref: '#/components/responses/ProblemValidacao' }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+  /policies/evaluate:
+    post:
+      tags: [abac]
+      summary: Avalia uma decisão de política (PDP online)
+      description: >-
+        Exige `policies:read`. Decide sem enforcement e sem carregar recurso: quem chama
+        informa os atributos. Serve de depuração e de PDP para consumidores que precisem de
+        decisão por atributo fora do IAM.
+      operationId: policiesEvaluate
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [subject, resource_type, resource, action]
+              properties:
+                subject:
+                  type: object
+                  additionalProperties: false
+                  required: [sub]
+                  properties:
+                    sub: { type: string, minLength: 1, maxLength: 128 }
+                    roles: { type: array, items: { type: string } }
+                    perm: { type: array, items: { type: string } }
+                resource_type: { type: string, minLength: 1, maxLength: 64 }
+                resource:
+                  description: Atributos do recurso alvo, por exemplo owner_id.
+                  type: object
+                action: { type: string, minLength: 1, maxLength: 64 }
+                env:
+                  type: object
+                  additionalProperties: false
+                  properties:
+                    ip: { type: string }
+                    now: { type: string, format: date-time }
+      responses:
+        '200':
+          description: Decisão
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PolicyDecision' }
+        '400': { $ref: '#/components/responses/ProblemValidacao' }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+  /policies/{id}:
+    get:
+      tags: [abac]
+      summary: Detalha uma política
+      description: Exige `policies:read`. Só o detalhe traz a condição.
+      operationId: policiesGet
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Política
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PolicyDetail' }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+        '404': { $ref: '#/components/responses/ProblemNaoEncontrado' }
+    patch:
+      tags: [abac]
+      summary: Atualiza uma política
+      description: >-
+        Exige `policies:write`. Política is_system é imutável (409). A escrita invalida o
+        cache do PDP no processo.
+      operationId: policiesUpdate
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                name: { type: string, minLength: 2, maxLength: 64, pattern: '^[a-z0-9_-]+$' }
+                description: { type: string, maxLength: 256, nullable: true }
+                effect: { type: string, enum: [permit, deny] }
+                resource_type: { type: string, minLength: 1, maxLength: 64 }
+                action: { type: string, minLength: 1, maxLength: 64 }
+                condition: { $ref: '#/components/schemas/PolicyCondition' }
+                priority: { type: integer, minimum: 0, maximum: 1000 }
+                enabled: { type: boolean }
+      responses:
+        '200':
+          description: Atualizada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Policy' }
+        '400': { $ref: '#/components/responses/ProblemValidacao' }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+        '404': { $ref: '#/components/responses/ProblemNaoEncontrado' }
+        '409': { $ref: '#/components/responses/ProblemConflito' }
+    delete:
+      tags: [abac]
+      summary: Remove uma política
+      description: Exige `policies:delete`. Política is_system é imutável (409).
+      operationId: policiesDelete
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: Removida }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+        '404': { $ref: '#/components/responses/ProblemNaoEncontrado' }
+        '409': { $ref: '#/components/responses/ProblemConflito' }
