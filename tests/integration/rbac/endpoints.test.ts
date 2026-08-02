@@ -179,7 +179,7 @@ describe('CRUD de papéis e permissões (writer)', () => {
     expect(patch.json<{ description: string }>().description).toBe('Cobrança e faturas');
   });
 
-  it('cria permissão (201) e associa a um papel (204)', async () => {
+  it('cria permissão (201) e o superadmin a associa a um papel (204)', async () => {
     const token = await logar(WRITER);
     const papel = await app.inject({
       method: 'POST',
@@ -200,7 +200,7 @@ describe('CRUD de papéis e permissões (writer)', () => {
     const assoc = await app.inject({
       method: 'POST',
       url: `/roles/${roleId}/permissions`,
-      headers: bearer(token),
+      headers: bearer(await logar(ADMIN)),
       payload: { permission_ids: [permId] },
     });
     expect(assoc.statusCode).toBe(204);
@@ -229,6 +229,50 @@ describe('CRUD de papéis e permissões (writer)', () => {
     });
     expect(extra.statusCode).toBe(400);
     expect(nomeRuim.statusCode).toBe(400);
+  });
+});
+
+describe('conceder permissão é exclusivo do superadmin', () => {
+  it('writer com roles:write NÃO associa permissão a papel ⇒ 403', async () => {
+    const token = await logar(WRITER);
+    const permId = await idDePermissao('roles:delete');
+    const res = await app.inject({
+      method: 'POST',
+      url: `/roles/${writerRoleId}/permissions`,
+      headers: bearer(token),
+      payload: { permission_ids: [permId] },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('nem o superadmin associa o curinga `*` a outro papel ⇒ 409', async () => {
+    const token = await logar(ADMIN);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/roles/${writerRoleId}/permissions`,
+      headers: bearer(token),
+      payload: { permission_ids: [await idDePermissao('*')] },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json<{ type: string }>().type).toContain('system-permission-immutable');
+  });
+
+  it('desassociar continua em roles:write (não escala privilégio)', async () => {
+    const token = await logar(WRITER);
+    // Papel descartável: desassociar do papel do próprio writer o deixaria sem permissão
+    // para os testes seguintes.
+    const papel = await app.inject({
+      method: 'POST',
+      url: '/roles',
+      headers: bearer(token),
+      payload: { name: 'descartavel' },
+    });
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/roles/${papel.json<{ id: string }>().id}/permissions/${await idDePermissao('roles:delete')}`,
+      headers: bearer(token),
+    });
+    expect(res.statusCode).toBe(204);
   });
 });
 

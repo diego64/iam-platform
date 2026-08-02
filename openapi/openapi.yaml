@@ -1014,7 +1014,10 @@ paths:
     post:
       tags: [rbac]
       summary: Associa permissões a um papel
-      description: Exige `roles:write`. Idempotente e atômico.
+      description: >-
+        Exige o papel `superadmin`: quem tem apenas `roles:write` poderia acrescentar
+        permissões ao próprio papel e escalar privilégio no login seguinte.
+        Idempotente e atômico. A permissão curinga `*` nunca é associada (409).
       operationId: rolePermissionsAdd
       security: [{ BearerAuth: [] }]
       parameters:
@@ -1039,6 +1042,7 @@ paths:
         '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
         '403': { $ref: '#/components/responses/ProblemSemPermissao' }
         '404': { $ref: '#/components/responses/ProblemNaoEncontrado' }
+        '409': { $ref: '#/components/responses/ProblemConflito' }
   /roles/{id}/permissions/{permId}:
     delete:
       tags: [rbac]

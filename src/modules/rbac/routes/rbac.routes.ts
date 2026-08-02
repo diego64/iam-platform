@@ -5,6 +5,9 @@
  *  - Toda rota passa primeiro por `verificarAccessToken` (autentica) e depois pelo guard
  *    (autoriza). Escrita de vínculo usuário↔papel exige o papel `superadmin` (RF-09); o
  *    resto exige a permissão do recurso.
+ *  - Conceder permissão a um papel também é exclusivo do superadmin: quem tem `roles:write`
+ *    poderia acrescentar permissões ao próprio papel e escalar privilégio no login seguinte.
+ *    Desassociar não escala nada e continua em `roles:write`.
  *  - Recebe serviços, guards e verificador por injeção; não conhece banco.
  */
 import type { FastifyInstance } from 'fastify';
@@ -127,12 +130,12 @@ export function registrarRotasDeRbac(app: FastifyInstance, deps: DependenciasDas
     {
       schema: {
         tags: ['rbac'],
-        summary: 'Associa permissões a um papel',
+        summary: 'Associa permissões a um papel (superadmin)',
         security: seguranca,
         params: idParams,
         body: associarPermissoesBody,
       },
-      preHandler: [auth, exigirPermissao('roles:write')],
+      preHandler: [auth, exigirPapel('superadmin')],
     },
     (req, resp) => controller.associarPermissoes(req, resp),
   );
