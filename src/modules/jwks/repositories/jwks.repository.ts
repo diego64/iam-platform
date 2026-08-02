@@ -117,6 +117,17 @@ export interface RepositorioJwks {
   listarElegiveis(agora: Date): Promise<ChaveJwks[]>;
   /** Metadados para a superfície administrativa — sem tocar no material cifrado. */
   listarMetadados(filtro?: { status?: StatusDaChave }): Promise<MetadadosDeChave[]>;
+  obterMetadadosPorKid(kid: string): Promise<MetadadosDeChave | null>;
+  /**
+   * Encerra a verificabilidade da chave agora — a revogação de emergência.
+   *
+   * Recusa-se a tocar na chave `active` (devolve `null`): sem promover a pré-publicada no
+   * mesmo commit, revogar a ativa deixaria o IdP sem chave de assinatura. Esse caminho é o
+   * `rotacionar` com janela zero; aqui ficam só `next` e `retired`.
+   */
+  revogar(kid: string): Promise<MetadadosDeChave | null>;
+  /** Apaga chaves que já não verificam nada há mais que a margem. Devolve quantas saíram. */
+  purgar(margemMs: number): Promise<number>;
   contarPorStatus(): Promise<Record<StatusDaChave, number>>;
 }
 
@@ -228,6 +239,42 @@ export function criarRepositorioJwks(pool: Pool): RepositorioJwks {
         [filtro.status ?? null],
       );
       return rows.map(paraMetadados);
+    },
+
+    async obterMetadadosPorKid(kid: string): Promise<MetadadosDeChave | null> {
+      const { rows } = await pool.query<LinhaDeMetadados>(
+        `SELECT ${COLUNAS_METADADOS} FROM jwks WHERE kid = $1`,
+        [kid],
+      );
+      const linha = rows[0];
+      return linha === undefined ? null : paraMetadados(linha);
+    },
+
+    async revogar(kid: string): Promise<MetadadosDeChave | null> {
+      const { rows } = await pool.query<LinhaDeMetadados>(
+        `UPDATE jwks
+            SET status = 'retired',
+                retired_at = COALESCE(retired_at, now()),
+                verifiable_until = now()
+          WHERE kid = $1 AND status <> 'active'
+          RETURNING ${COLUNAS_METADADOS}`,
+        [kid],
+      );
+      const linha = rows[0];
+      return linha === undefined ? null : paraMetadados(linha);
+    },
+
+    async purgar(margemMs: number): Promise<number> {
+      // Só sai o que já não verifica nada há mais que a margem. A comparação é estritamente
+      // menor: uma chave cujo fim de verificabilidade é agora ainda pode ter token vivo.
+      const { rowCount } = await pool.query(
+        `DELETE FROM jwks
+          WHERE status = 'retired'
+            AND verifiable_until IS NOT NULL
+            AND verifiable_until < now() - ($1::bigint * interval '1 millisecond')`,
+        [margemMs],
+      );
+      return rowCount ?? 0;
     },
 
     async contarPorStatus(): Promise<Record<StatusDaChave, number>> {
