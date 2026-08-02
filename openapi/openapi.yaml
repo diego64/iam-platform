@@ -21,6 +21,8 @@ tags:
     description: Publicação das chaves públicas de verificação (JWK Set).
   - name: auth
     description: Login, logout e perfil do usuário autenticado.
+  - name: rbac
+    description: Papéis, permissões e suas associações. Autorização por permissão (guard).
 servers:
   - url: http://localhost:3000
     description: Desenvolvimento local
@@ -189,11 +191,97 @@ components:
         status: { type: string, enum: [active, blocked] }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    Role:
+      type: object
+      additionalProperties: false
+      required: [id, name, description, is_system]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        is_system: { type: boolean }
+    RoleDetail:
+      type: object
+      additionalProperties: false
+      required: [id, name, description, is_system, permissions]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        is_system: { type: boolean }
+        permissions:
+          type: array
+          items: { type: string }
+    Permission:
+      type: object
+      additionalProperties: false
+      required: [id, name, description, is_system]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        is_system: { type: boolean }
+    RoleList:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Role' }
+        total: { type: integer }
+    PermissionList:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Permission' }
+        total: { type: integer }
+    UserRoles:
+      type: object
+      additionalProperties: false
+      required: [user_id, roles]
+      properties:
+        user_id: { type: string, format: uuid }
+        roles:
+          type: array
+          items:
+            type: object
+            required: [id, name]
+            properties:
+              id: { type: string, format: uuid }
+              name: { type: string }
   securitySchemes:
     BearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
+  responses:
+    ProblemValidacao:
+      description: Payload inválido (RFC 7807)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    ProblemNaoAutenticado:
+      description: Token ausente, inválido ou revogado
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    ProblemSemPermissao:
+      description: Autenticado, mas sem a permissão/papel exigido
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    ProblemNaoEncontrado:
+      description: Recurso não encontrado
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    ProblemConflito:
+      description: Conflito — recurso de sistema imutável ou nome já existente
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
 paths:
   /health/live:
     get:
@@ -808,3 +896,296 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+  /roles:
+    post:
+      tags: [rbac]
+      summary: Cria um papel
+      description: Exige a permissão `roles:write`.
+      operationId: rolesCreate
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name]
+              properties:
+                name: { type: string, minLength: 2, maxLength: 64, pattern: '^[a-z0-9_-]+$' }
+                description: { type: string, maxLength: 256 }
+      responses:
+        '201':
+          description: Papel criado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Role' }
+        '400': { $ref: '#/components/responses/ProblemValidacao' }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+        '409':
+          description: Papel com esse nome já existe
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+    get:
+      tags: [rbac]
+      summary: Lista papéis com paginação
+      description: Exige a permissão `roles:read`.
+      operationId: rolesList
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - {
+            in: query,
+            name: limit,
+            schema: { type: integer, minimum: 1, maximum: 100, default: 50 },
+          }
+        - { in: query, name: offset, schema: { type: integer, minimum: 0, default: 0 } }
+      responses:
+        '200':
+          description: Página de papéis
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoleList' }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+  /roles/{id}:
+    get:
+      tags: [rbac]
+      summary: Detalha um papel e suas permissões
+      description: Exige a permissão `roles:read`.
+      operationId: rolesGet
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Papel com permissões
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoleDetail' }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+        '404': { $ref: '#/components/responses/ProblemNaoEncontrado' }
+    patch:
+      tags: [rbac]
+      summary: Renomeia/atualiza um papel
+      description: Exige `roles:write`. Papel `is_system` é imutável (409).
+      operationId: rolesUpdate
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                name: { type: string, minLength: 2, maxLength: 64, pattern: '^[a-z0-9_-]+$' }
+                description: { type: string, maxLength: 256, nullable: true }
+      responses:
+        '200':
+          description: Papel atualizado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Role' }
+        '400': { $ref: '#/components/responses/ProblemValidacao' }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+        '404': { $ref: '#/components/responses/ProblemNaoEncontrado' }
+        '409': { $ref: '#/components/responses/ProblemConflito' }
+    delete:
+      tags: [rbac]
+      summary: Remove um papel
+      description: Exige `roles:delete`. Papel `is_system` é imutável (409).
+      operationId: rolesDelete
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: Removido }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+        '404': { $ref: '#/components/responses/ProblemNaoEncontrado' }
+        '409': { $ref: '#/components/responses/ProblemConflito' }
+  /roles/{id}/permissions:
+    post:
+      tags: [rbac]
+      summary: Associa permissões a um papel
+      description: Exige `roles:write`. Idempotente e atômico.
+      operationId: rolePermissionsAdd
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [permission_ids]
+              properties:
+                permission_ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items: { type: string, format: uuid }
+      responses:
+        '204': { description: Associado }
+        '400': { $ref: '#/components/responses/ProblemValidacao' }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+        '404': { $ref: '#/components/responses/ProblemNaoEncontrado' }
+  /roles/{id}/permissions/{permId}:
+    delete:
+      tags: [rbac]
+      summary: Desassocia uma permissão de um papel
+      description: Exige `roles:write`.
+      operationId: rolePermissionsRemove
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+        - { in: path, name: permId, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: Desassociado }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+        '404': { $ref: '#/components/responses/ProblemNaoEncontrado' }
+  /permissions:
+    post:
+      tags: [rbac]
+      summary: Cria uma permissão
+      description: Exige `permissions:write`. Formato `recurso:acao`.
+      operationId: permissionsCreate
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name]
+              properties:
+                name:
+                  {
+                    type: string,
+                    minLength: 3,
+                    maxLength: 64,
+                    pattern: '^[a-z0-9_-]+:([a-z0-9_-]+|\*)$',
+                  }
+                description: { type: string, maxLength: 256 }
+      responses:
+        '201':
+          description: Permissão criada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Permission' }
+        '400': { $ref: '#/components/responses/ProblemValidacao' }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+        '409':
+          description: Permissão com esse nome já existe
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+    get:
+      tags: [rbac]
+      summary: Lista permissões com paginação
+      description: Exige `permissions:read`.
+      operationId: permissionsList
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - {
+            in: query,
+            name: limit,
+            schema: { type: integer, minimum: 1, maximum: 100, default: 50 },
+          }
+        - { in: query, name: offset, schema: { type: integer, minimum: 0, default: 0 } }
+      responses:
+        '200':
+          description: Página de permissões
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PermissionList' }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+  /permissions/{id}:
+    delete:
+      tags: [rbac]
+      summary: Remove uma permissão
+      description: Exige `permissions:delete`. Permissão `is_system` é imutável (409).
+      operationId: permissionsDelete
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: Removida }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+        '404': { $ref: '#/components/responses/ProblemNaoEncontrado' }
+        '409': { $ref: '#/components/responses/ProblemConflito' }
+  /users/{id}/roles:
+    get:
+      tags: [rbac]
+      summary: Lista os papéis de um usuário
+      description: Exige `roles:read`.
+      operationId: userRolesList
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Papéis do usuário
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserRoles' }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+        '404': { $ref: '#/components/responses/ProblemNaoEncontrado' }
+    post:
+      tags: [rbac]
+      summary: Atribui papéis a um usuário (superadmin)
+      description: Escrita exclusiva do papel `superadmin` (RF-09).
+      operationId: userRolesAssign
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [role_ids]
+              properties:
+                role_ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 50
+                  items: { type: string, format: uuid }
+      responses:
+        '204': { description: Atribuído }
+        '400': { $ref: '#/components/responses/ProblemValidacao' }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+        '404': { $ref: '#/components/responses/ProblemNaoEncontrado' }
+  /users/{id}/roles/{roleId}:
+    delete:
+      tags: [rbac]
+      summary: Revoga um papel de um usuário (superadmin)
+      description: Escrita exclusiva do papel `superadmin` (RF-09).
+      operationId: userRolesRevoke
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+        - { in: path, name: roleId, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: Revogado }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+        '404': { $ref: '#/components/responses/ProblemNaoEncontrado' }

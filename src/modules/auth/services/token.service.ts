@@ -3,7 +3,7 @@
  * Consumido por: o `AuthService` (login).
  * Regras:
  *  - Header `{ alg: 'EdDSA', kid }`; claims `sub`, `jti` (UUIDv7), `iat`, `exp`, `iss`,
- *    `aud`, `scope`, `roles`.
+ *    `aud`, `scope`, `roles`, `perm` (permissões efetivas — base do guard da SPEC 003).
  *  - A chave privada vem do JWKS já decifrada e encapsulada; é usada no último instante
  *    (`.usar()`), sem transitar por objeto logável.
  */
@@ -20,6 +20,8 @@ export interface ConfiguracaoDeToken {
 export interface DadosParaToken {
   readonly sub: string;
   readonly roles: string[];
+  /** Permissões efetivas do usuário — vão na claim `perm` para autorização offline. */
+  readonly permissions: string[];
   readonly scope: string;
 }
 
@@ -45,7 +47,11 @@ export function criarTokenService(
       const iat = Math.floor(Date.now() / 1000);
       const exp = iat + config.ttlSegundos;
 
-      const token = await new SignJWT({ scope: dados.scope, roles: dados.roles })
+      const token = await new SignJWT({
+        scope: dados.scope,
+        roles: dados.roles,
+        perm: dados.permissions,
+      })
         .setProtectedHeader({ alg: 'EdDSA', kid })
         .setSubject(dados.sub)
         .setJti(jti)

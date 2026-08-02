@@ -35,7 +35,12 @@ describe('TokenService.emitir', () => {
   it('assina um JWT EdDSA com header kid e todos os claims', async () => {
     const { service, publicJwk, kid } = await montar();
 
-    const emitido = await service.emitir({ sub: 'user-1', roles: ['admin'], scope: 'leitura' });
+    const emitido = await service.emitir({
+      sub: 'user-1',
+      roles: ['admin'],
+      permissions: ['users:read', 'users:delete'],
+      scope: 'leitura',
+    });
 
     expect(decodeProtectedHeader(emitido.token)).toMatchObject({ alg: 'EdDSA', kid });
 
@@ -50,6 +55,7 @@ describe('TokenService.emitir', () => {
     expect(payload.jti).toBe(emitido.jti);
     expect(payload.scope).toBe('leitura');
     expect(payload.roles).toEqual(['admin']);
+    expect(payload.perm).toEqual(['users:read', 'users:delete']);
     expect(payload.iss).toBe(CONFIG.emissor);
     expect(payload.aud).toBe(CONFIG.audiencia);
     expect(payload.exp).toBe(Math.floor(emitido.expiraEm.getTime() / 1000));
@@ -58,8 +64,8 @@ describe('TokenService.emitir', () => {
 
   it('gera jti distinto a cada emissão', async () => {
     const { service } = await montar();
-    const a = await service.emitir({ sub: 'u', roles: [], scope: '' });
-    const b = await service.emitir({ sub: 'u', roles: [], scope: '' });
+    const a = await service.emitir({ sub: 'u', roles: [], permissions: [], scope: '' });
+    const b = await service.emitir({ sub: 'u', roles: [], permissions: [], scope: '' });
     expect(a.jti).not.toBe(b.jti);
   });
 });

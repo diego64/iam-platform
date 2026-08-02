@@ -23,8 +23,11 @@ import { uuidv7 } from '../../../shared/crypto/uuidv7.js';
 
 export interface DependenciasDoRefreshTokenService {
   readonly repo: RepositorioDeRefreshToken;
-  /** Leitura do usuário no refresh — status e papéis atuais (não os do login). */
-  readonly usuarios: Pick<RepositorioDeAutenticacao, 'buscarPorId' | 'papeisDoUsuario'>;
+  /** Leitura do usuário no refresh — status, papéis e permissões atuais (não os do login). */
+  readonly usuarios: Pick<
+    RepositorioDeAutenticacao,
+    'buscarPorId' | 'papeisDoUsuario' | 'permissoesEfetivas'
+  >;
   readonly tokenService: TokenService;
   /** Validade deslizante (idle) por token, renovada a cada rotação. */
   readonly ttlIdleMs: number;
@@ -140,8 +143,16 @@ export function criarRefreshTokenService(
         throw new ErroDeRefreshInvalido('usuario_bloqueado');
       }
 
-      const roles = await deps.usuarios.papeisDoUsuario(doc.userId);
-      const emitido = await deps.tokenService.emitir({ sub: doc.userId, roles, scope });
+      const [roles, permissions] = await Promise.all([
+        deps.usuarios.papeisDoUsuario(doc.userId),
+        deps.usuarios.permissoesEfetivas(doc.userId),
+      ]);
+      const emitido = await deps.tokenService.emitir({
+        sub: doc.userId,
+        roles,
+        permissions,
+        scope,
+      });
       const novoRefresh = await persistirNovo(doc.userId, doc.familyId, doc.absoluteExpiresAt);
 
       medidor.contarRotacao();

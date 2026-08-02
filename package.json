@@ -32,7 +32,7 @@
     "test:integration": "node --env-file-if-exists=infra/compose/.env ./node_modules/vitest/vitest.mjs run --dir tests/integration --no-file-parallelism",
     "test:contract": "vitest run --dir tests/contract",
     "test:e2e": "pnpm docker:build:test && node --env-file-if-exists=infra/compose/.env ./node_modules/vitest/vitest.mjs run --dir tests/e2e",
-    "test:coverage": "vitest run --coverage --no-file-parallelism",
+    "test:coverage": "node --env-file-if-exists=infra/compose/.env ./node_modules/vitest/vitest.mjs run --coverage --no-file-parallelism",
     "test:load": "k6 run tests/performance/k6/login-flood.js",
     "migrate": "tsx src/database/migrate.ts",
     "seed": "tsx scripts/seed.ts",

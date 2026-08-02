@@ -28,6 +28,8 @@ export interface RepositorioDeAutenticacao {
   buscarPorEmail(email: string): Promise<UsuarioParaLogin | null>;
   buscarPorId(id: string): Promise<UsuarioParaPerfil | null>;
   papeisDoUsuario(userId: string): Promise<string[]>;
+  /** Permissões efetivas (distintas) via papéis → permissões — vão na claim `perm`. */
+  permissoesEfetivas(userId: string): Promise<string[]>;
 }
 
 interface LinhaDeLogin {
@@ -73,6 +75,19 @@ export function criarRepositorioDeAutenticacao(pool: Pool): RepositorioDeAutenti
            JOIN roles r ON r.id = ur.role_id
           WHERE ur.user_id = $1
           ORDER BY r.name`,
+        [userId],
+      );
+      return rows.map((linha) => linha.name);
+    },
+
+    async permissoesEfetivas(userId: string): Promise<string[]> {
+      const { rows } = await pool.query<{ name: string }>(
+        `SELECT DISTINCT p.name
+           FROM user_roles ur
+           JOIN role_permissions rp ON rp.role_id = ur.role_id
+           JOIN permissions p ON p.id = rp.permission_id
+          WHERE ur.user_id = $1
+          ORDER BY p.name`,
         [userId],
       );
       return rows.map((linha) => linha.name);

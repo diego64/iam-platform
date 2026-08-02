@@ -16,6 +16,8 @@ export interface CargaDoToken {
 export interface UsuarioAutenticado {
   readonly id: string;
   readonly roles: string[];
+  /** Permissões efetivas (claim `perm`); base do guard de autorização (SPEC 003). */
+  readonly permissions: string[];
   readonly scope: string;
 }
 
