@@ -1,12 +1,14 @@
 // Rotação de refresh sob carga: cada VU loga uma vez e depois rotaciona em cadeia,
 // sempre com o token mais novo — mede o custo de lookup + rotação atômica + assinatura.
 import http from 'k6/http';
-import { check } from 'k6';
+import { check, fail } from 'k6';
 
 const BASE = __ENV.BASE_URL || 'http://localhost:3000';
 const SMOKE = __ENV.SMOKE === 'true';
 const EMAIL = __ENV.EMAIL || 'load@iam.local';
-const SENHA = __ENV.SENHA || 'S3nh@DeCarga!';
+// Sem default: uma senha embutida aqui é uma credencial versionada, e o dia em que alguém
+// apontar o script para um ambiente real ela vira a senha que ele tenta de verdade.
+const SENHA = __ENV.SENHA || '';
 
 export const options = {
   scenarios: {
@@ -29,6 +31,18 @@ export const options = {
 };
 
 const cabecalhos = { headers: { 'Content-Type': 'application/json' } };
+
+/**
+ * Portão único da execução: aborta antes de gerar carga quando falta a credencial.
+ *
+ * Validar aqui, e não dentro do cenário, evita dezenas de VUs disparando a falha em
+ * paralelo e enterrando o motivo real no meio do relatório.
+ */
+export function setup() {
+  if (!SENHA) {
+    fail('SENHA ausente: sem ela o login falha e o cenário mede 401, não rotação');
+  }
+}
 
 export default function () {
   const login = http.post(
