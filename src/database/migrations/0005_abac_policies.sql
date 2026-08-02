@@ -49,3 +49,17 @@ VALUES (
   true
 )
 ON CONFLICT (name) DO NOTHING;
+
+-- Sem esta, ligar o ABAC num endpoint administrativo tiraria o acesso de quem administra:
+-- a posse nega todo mundo que não seja o dono, inclusive o superadministrador. O ABAC é
+-- aditivo ao RBAC — passa quem é dono OU quem carrega o curinga de superadministração.
+-- A checagem é sobre a claim `perm` do token, o mesmo atributo que o guard do RBAC lê.
+INSERT INTO policies (name, description, effect, resource_type, action, condition, is_system)
+VALUES (
+  'system-privilege-override',
+  'Permite a quem carrega o curinga de superadministração',
+  'permit', '*', '*',
+  '{"op":"contains","attr":"subject.perm","value":"*"}'::jsonb,
+  true
+)
+ON CONFLICT (name) DO NOTHING;

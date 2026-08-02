@@ -43,6 +43,15 @@ describe('seed de ABAC (migração 0005)', () => {
     });
   });
 
+  it('semeia o override de privilégio, sem o qual o ABAC trancaria o administrador', async () => {
+    const { rows } = await pool.query<{ is_system: boolean; condition: unknown }>(
+      `SELECT is_system, condition FROM policies WHERE name = 'system-privilege-override'`,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.is_system).toBe(true);
+    expect(rows[0]?.condition).toEqual({ op: 'contains', attr: 'subject.perm', value: '*' });
+  });
+
   it('semeia as três permissões policies:* vinculadas ao superadmin', async () => {
     const { rows } = await pool.query<{ name: string }>(
       `SELECT p.name FROM roles r
@@ -59,7 +68,7 @@ describe('seed de ABAC (migração 0005)', () => {
     await aplicarPoliticas(pool);
 
     const politica = await pool.query<{ n: number }>(
-      "SELECT count(*)::int AS n FROM policies WHERE name = 'system-ownership'",
+      'SELECT count(*)::int AS n FROM policies WHERE is_system',
     );
     const permissoes = await pool.query<{ n: number }>(
       "SELECT count(*)::int AS n FROM permissions WHERE name LIKE 'policies:%'",
@@ -70,7 +79,7 @@ describe('seed de ABAC (migração 0005)', () => {
          JOIN permissions p ON p.id = rp.permission_id
         WHERE r.name = 'superadmin' AND p.name LIKE 'policies:%'`,
     );
-    expect(politica.rows[0]?.n).toBe(1);
+    expect(politica.rows[0]?.n).toBe(2);
     expect(permissoes.rows[0]?.n).toBe(3);
     expect(vinculos.rows[0]?.n).toBe(3);
   });

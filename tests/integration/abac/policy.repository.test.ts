@@ -146,7 +146,7 @@ describe('listagem e filtros', () => {
 
     expect(await repo.contar({ resourceType: 'user' })).toBe(2);
     expect(await repo.contar({ resourceType: 'user', enabled: true })).toBe(1);
-    expect(await repo.contar({})).toBe(4); // 3 do teste + o seed system-ownership
+    expect(await repo.contar({})).toBe(5); // 3 do teste + as 2 políticas de sistema
   });
 });
 
@@ -163,7 +163,9 @@ describe('seleção de políticas aplicáveis (caminho do PDP)', () => {
       'acao-curinga',
       'exata',
       'recurso-curinga',
-      'system-ownership', // o seed é `*`/`*`
+      // As duas políticas de sistema são `*`/`*`, então entram em todo alvo.
+      'system-ownership',
+      'system-privilege-override',
     ]);
   });
 
