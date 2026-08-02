@@ -8,6 +8,7 @@
  *  - Existência do papel/usuário é checada com SELECT dentro da transação; a existência
  *    da outra ponta (permissão/papel do pivot) vem da violação de FK (23503), já que a
  *    primeira ponta acabou de ser confirmada.
+ *  - A permissão curinga `*` nunca é associada pela API: ela pertence só ao papel semeado.
  */
 import type { Pool, PoolClient } from 'pg';
 import { ErroDeRbac } from '../errors/rbac.errors.js';
@@ -61,6 +62,13 @@ export function criarRepositorioDeAssociacao(pool: Pool): RepositorioDeAssociaca
       await emTransacao(async (cliente) => {
         const papel = await cliente.query('SELECT 1 FROM roles WHERE id = $1', [roleId]);
         if (papel.rowCount === 0) throw new ErroDeRbac('papel-nao-encontrado');
+        // O curinga global só existe no papel semeado: conceder `*` a qualquer outro papel
+        // entrega acesso total a quem entrar nele, então a API nunca o associa.
+        const curinga = await cliente.query(
+          `SELECT 1 FROM permissions WHERE id = ANY($1::uuid[]) AND name = '*'`,
+          [permissionIds],
+        );
+        if (curinga.rowCount !== 0) throw new ErroDeRbac('permissao-imutavel');
         try {
           await cliente.query(
             `INSERT INTO role_permissions (role_id, permission_id)

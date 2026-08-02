@@ -39,6 +39,13 @@ describe('rotas do RBAC no openapi.yaml', () => {
     expect(bloco).toContain('RoleDetail');
   });
 
+  it('/roles/{id}/permissions documenta superadmin e o 409 do curinga', () => {
+    const bloco = blocoDoPath('/roles/{id}/permissions');
+    expect(bloco).toContain('superadmin');
+    expect(bloco).toContain("'409'");
+    expect(bloco).toContain('permission_ids');
+  });
+
   it('/permissions/{id} documenta 409 (permissão de sistema imutável)', () => {
     const bloco = blocoDoPath('/permissions/{id}');
     expect(bloco).toContain("'409'");
