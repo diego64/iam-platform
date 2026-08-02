@@ -20,6 +20,7 @@ import type {
   MetadadosDeChave,
   StatusDaChave,
 } from '../../../../src/modules/jwks/types/jwks.types.js';
+import { Writable } from 'node:stream';
 import { criarLogger } from '../../../../src/shared/logger/index.js';
 
 const MASTER = 'master-key-de-teste-com-mais-de-32-bytes';
@@ -382,5 +383,126 @@ describe('purgar e idade da ativa', () => {
     montar({});
 
     expect(await service.idadeDaAtivaEmSegundos()).toBeNull();
+  });
+});
+
+describe('log estruturado das mutações', () => {
+  /** Captura a saída JSON real do Pino, passando pela censura configurada. */
+  function servicoComCaptura(): { linhas: () => Record<string, unknown>[] } {
+    const capturadas: string[] = [];
+    const destino = new Writable({
+      write(pedaco: Buffer, _codificacao, prosseguir): void {
+        capturadas.push(pedaco.toString());
+        prosseguir();
+      },
+    });
+
+    fake = repoFake({ active: 'kid-ativa' });
+    service = criarKeyRotationService({
+      repo: fake.repo,
+      masterKey: MASTER,
+      logger: criarLogger({ nivel: 'info', destino }),
+      invalidarCache: vi.fn(),
+      graceMs: GRACA_MS,
+      prepublicacaoMinMs: PREPUBLICACAO_MS,
+      purgaAposMs: 0,
+      agora: () => fake.relogio(),
+    });
+
+    return {
+      linhas: () =>
+        capturadas
+          .join('')
+          .split('\n')
+          .filter((l) => l.trim() !== '')
+          .map((l) => JSON.parse(l) as Record<string, unknown>),
+    };
+  }
+
+  it('registra o preparo com kid, motivo e ator', async () => {
+    const captura = servicoComCaptura();
+
+    await service.prepararProxima('ator-123');
+
+    const linha = captura.linhas().at(-1);
+    expect(linha).toMatchObject({
+      kid_anterior: null,
+      motivo: 'prepare',
+      ator_id: 'ator-123',
+    });
+    expect(linha?.['kid_novo']).toEqual(expect.any(String));
+  });
+
+  it('registra a rotação com o kid anterior e o novo', async () => {
+    const captura = servicoComCaptura();
+    await service.prepararProxima();
+    fake.avancar(PREPUBLICACAO_MS);
+
+    await service.rotacionar({ motivo: 'scheduled', ator: 'ator-456' });
+
+    const rotacao = captura
+      .linhas()
+      .find((l) => typeof l['msg'] === 'string' && l['msg'].includes('jwks.rotate'));
+    expect(rotacao).toMatchObject({
+      kid_anterior: 'kid-ativa',
+      motivo: 'scheduled',
+      ator_id: 'ator-456',
+    });
+  });
+
+  it('registra a revogação com o motivo textual informado', async () => {
+    const captura = servicoComCaptura();
+    const preparada = await service.prepararProxima();
+
+    await service.revogar(preparada.kid, 'privada exposta em dump', 'ator-789');
+
+    const revogacao = captura
+      .linhas()
+      .find((l) => typeof l['msg'] === 'string' && l['msg'].includes('jwks.revoke'));
+    expect(revogacao).toMatchObject({
+      kid_anterior: preparada.kid,
+      motivo: 'privada exposta em dump',
+      ator_id: 'ator-789',
+    });
+  });
+
+  // O log é retido e indexado por muito mais tempo que o incidente que o gerou.
+  it('nenhuma linha carrega material de chave', async () => {
+    const captura = servicoComCaptura();
+    await service.prepararProxima('ator-1');
+    fake.avancar(PREPUBLICACAO_MS);
+    await service.rotacionar();
+    const proxima = await fake.repo.obterProxima();
+    await service.revogar(proxima?.kid ?? '', 'limpeza');
+    await service.purgar();
+
+    const bruto = JSON.stringify(captura.linhas());
+    for (const proibido of [
+      'privateKeyEnc',
+      'private_key_enc',
+      'privateKey',
+      'publicJwk',
+      'master',
+      MASTER,
+      '"d"',
+    ]) {
+      expect(bruto).not.toContain(proibido);
+    }
+  });
+
+  it('registra a purga apenas quando removeu alguma coisa', async () => {
+    const captura = servicoComCaptura();
+    await service.prepararProxima();
+    fake.avancar(PREPUBLICACAO_MS);
+    await service.rotacionar();
+    const antes = captura.linhas().length;
+
+    await service.purgar(); // nada fora da margem ainda
+    expect(captura.linhas()).toHaveLength(antes);
+
+    fake.avancar(GRACA_MS + 1);
+    await service.purgar();
+
+    expect(captura.linhas().at(-1)).toMatchObject({ removidas: 1, motivo: 'purge' });
   });
 });
