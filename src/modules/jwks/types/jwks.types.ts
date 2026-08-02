@@ -32,4 +32,27 @@ export interface ChaveJwks {
   readonly criadaEm: Date;
   readonly ativadaEm: Date | null;
   readonly aposentadaEm: Date | null;
+  /**
+   * Instante em que a chave deixa de verificar tokens; `null` enquanto ela não foi
+   * aposentada. É o que separa a expiração normal da graça (`aposentadaEm + janela`) da
+   * revogação de emergência (`agora`) — as duas gravam a mesma coluna.
+   */
+  readonly verificavelAte: Date | null;
+}
+
+/**
+ * A mesma chave sem o material cifrado, para a superfície administrativa.
+ *
+ * Tipo à parte em vez de `Omit<ChaveJwks, 'privateKeyEnc'>` porque a garantia é da
+ * consulta: a listagem administrativa não seleciona `private_key_enc`, então não há o que
+ * vazar mesmo que alguém serialize o objeto inteiro.
+ */
+export interface MetadadosDeChave {
+  readonly kid: string;
+  readonly algorithm: 'EdDSA';
+  readonly status: StatusDaChave;
+  readonly criadaEm: Date;
+  readonly ativadaEm: Date | null;
+  readonly aposentadaEm: Date | null;
+  readonly verificavelAte: Date | null;
 }

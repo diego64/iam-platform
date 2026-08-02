@@ -1,7 +1,8 @@
 /**
- * Cobre o repositório de chaves contra PostgreSQL real: o índice único parcial que impede
- * uma segunda chave `active`, o round-trip de `public_jwk` (JSONB) e `private_key_enc`
- * (BYTEA), e a janela de graça em `listarElegiveis` (retired dentro entra, fora sai).
+ * Cobre o repositório de chaves contra PostgreSQL real: os índices únicos parciais que
+ * impedem uma segunda chave `active` ou `next`, o round-trip de `public_jwk` (JSONB) e
+ * `private_key_enc` (BYTEA), a verificabilidade lida de `verifiable_until` (retired que
+ * ainda verifica entra, o resto sai) e a listagem administrativa sem material de chave.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Pool } from 'pg';
@@ -17,7 +18,6 @@ import { urlPostgresDeTeste } from '../helpers/ambiente.js';
 import { limparJwks, recriarSchemaJwks } from './schema.js';
 
 const MASTER = 'master-key-de-teste-com-mais-de-32-bytes';
-const GRACE_MS = 15 * 60 * 1000;
 
 let pool: Pool;
 let repo: RepositorioJwks;
@@ -47,7 +47,7 @@ afterAll(async () => {
   await pool.end();
 });
 
-describe('índice único parcial (jwks_one_active)', () => {
+describe('índices únicos parciais (jwks_one_active, jwks_one_next)', () => {
   it('impede uma segunda chave active', async () => {
     await repo.inserir(await novaEntrada('active'));
     await expect(repo.inserir(await novaEntrada('active'))).rejects.toMatchObject({
@@ -55,11 +55,19 @@ describe('índice único parcial (jwks_one_active)', () => {
     });
   });
 
-  it('permite várias chaves next/retired', async () => {
+  // A rotação promove `next → active` sem escolher entre candidatas: só existe uma.
+  it('impede uma segunda chave next', async () => {
     await repo.inserir(await novaEntrada('next'));
+    await expect(repo.inserir(await novaEntrada('next'))).rejects.toMatchObject({
+      code: '23505',
+    });
+  });
+
+  it('permite várias chaves retired — cada rotação aposenta mais uma', async () => {
     await repo.inserir(await novaEntrada('next'));
     await repo.inserir(await novaEntrada('retired'));
-    expect(await repo.contarPorStatus()).toMatchObject({ next: 2, retired: 1 });
+    await repo.inserir(await novaEntrada('retired'));
+    expect(await repo.contarPorStatus()).toMatchObject({ next: 1, retired: 2 });
   });
 });
 
@@ -82,31 +90,76 @@ describe('inserir e obterAtiva', () => {
   });
 });
 
-describe('listarElegiveis (janela de graça)', () => {
-  it('inclui active e next; retired entra dentro da graça e sai fora dela', async () => {
+describe('listarElegiveis (verificabilidade materializada)', () => {
+  /** Aposenta a chave gravando o instante em que ela deixa de verificar. */
+  async function aposentar(kid: string, verificavelAte: Date): Promise<void> {
+    await pool.query(
+      "UPDATE jwks SET status = 'retired', retired_at = now(), verifiable_until = $2 WHERE kid = $1",
+      [kid, verificavelAte],
+    );
+  }
+
+  it('inclui active e next; retired entra enquanto verifica e sai depois', async () => {
     const agora = new Date();
     await repo.inserir(await novaEntrada('active'));
     await repo.inserir(await novaEntrada('next'));
 
-    // Retired DENTRO da graça: aposentada há 5 min.
     const dentro = await repo.inserir(await novaEntrada('retired'));
-    await pool.query('UPDATE jwks SET retired_at = $2 WHERE kid = $1', [
-      dentro.kid,
-      new Date(agora.getTime() - 5 * 60 * 1000),
-    ]);
+    await aposentar(dentro.kid, new Date(agora.getTime() + 10 * 60 * 1000));
 
-    // Retired FORA da graça: aposentada há 20 min.
     const fora = await repo.inserir(await novaEntrada('retired'));
-    await pool.query('UPDATE jwks SET retired_at = $2 WHERE kid = $1', [
-      fora.kid,
-      new Date(agora.getTime() - 20 * 60 * 1000),
-    ]);
+    await aposentar(fora.kid, new Date(agora.getTime() - 5 * 60 * 1000));
 
-    const elegiveis = await repo.listarElegiveis(agora, GRACE_MS);
-    const kids = elegiveis.map((c) => c.kid);
+    const kids = (await repo.listarElegiveis()).map((c) => c.kid);
 
     expect(kids).toContain(dentro.kid);
     expect(kids).not.toContain(fora.kid);
-    expect(kids).toHaveLength(3); // active + next + retired-dentro
+    expect(kids).toHaveLength(3); // active + next + retired-que-ainda-verifica
+  });
+
+  it('devolve a chave já aposentada com verificavelAte preenchido', async () => {
+    const agora = new Date();
+    const chave = await repo.inserir(await novaEntrada('retired'));
+    const ate = new Date(agora.getTime() + 60_000);
+    await aposentar(chave.kid, ate);
+
+    const elegivel = (await repo.listarElegiveis()).find((c) => c.kid === chave.kid);
+
+    expect(elegivel?.verificavelAte?.toISOString()).toBe(ate.toISOString());
+    expect(elegivel?.aposentadaEm).toBeInstanceOf(Date);
+  });
+
+  // Sem verifiable_until, uma chave marcada retired à mão não verifica nada — a coluna é o
+  // único critério, e o default nulo é o mais seguro.
+  it('exclui retired sem verifiable_until', async () => {
+    const chave = await repo.inserir(await novaEntrada('retired'));
+
+    const kids = (await repo.listarElegiveis()).map((c) => c.kid);
+
+    expect(kids).not.toContain(chave.kid);
+  });
+});
+
+describe('obterProxima e listarMetadados', () => {
+  it('devolve a chave pré-publicada, ou null quando não há', async () => {
+    expect(await repo.obterProxima()).toBeNull();
+
+    const proxima = await repo.inserir(await novaEntrada('next'));
+
+    expect((await repo.obterProxima())?.kid).toBe(proxima.kid);
+  });
+
+  it('lista metadados sem material de chave, filtrando por status', async () => {
+    await repo.inserir(await novaEntrada('active'));
+    const proxima = await repo.inserir(await novaEntrada('next'));
+
+    const todos = await repo.listarMetadados();
+    const soNext = await repo.listarMetadados({ status: 'next' });
+
+    expect(todos).toHaveLength(2);
+    expect(soNext.map((c) => c.kid)).toEqual([proxima.kid]);
+    // O material cifrado não é sequer selecionado: não há o que vazar na serialização.
+    expect(JSON.stringify(todos)).not.toContain('privateKeyEnc');
+    expect(Object.keys(soNext[0] ?? {})).not.toContain('publicJwk');
   });
 });

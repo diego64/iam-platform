@@ -155,6 +155,42 @@ describe('bootstrap — configuração inválida', () => {
     expect(resultado.saida).not.toContain('boot.listening');
   });
 
+  // Cache vivendo mais que a graça faz a rotação emitir token natimorto: a réplica com
+  // cache velho assina com a chave recém-aposentada, que já saiu do conjunto de verificação.
+  it('sai com código 1 quando o cache de chaves dura mais que a janela de graça', async () => {
+    const resultado = await executarServidor({
+      NODE_ENV: 'test',
+      POSTGRES_URL: urlPostgresDeTeste(),
+      MONGODB_URL: urlMongoDeTeste(),
+      JWKS_CACHE_TTL_MS: '900000',
+      JWKS_GRACE_PERIOD_MS: '300000',
+    });
+
+    expect(resultado.codigo).toBe(1);
+    expect(resultado.saida).toContain('ENV_INVALIDO');
+    expect(resultado.saida).toContain('JWKS_CACHE_TTL_MS');
+    expect(resultado.saida).not.toContain('boot.listening');
+  });
+
+  it('sobe com o par cache/graça coerente', async () => {
+    const porta = await portaLivre();
+    const resultado = await executarServidor(
+      {
+        NODE_ENV: 'test',
+        LOG_LEVEL: 'info',
+        PORT: String(porta),
+        POSTGRES_URL: urlPostgresDeTeste(),
+        MONGODB_URL: urlMongoDeTeste(),
+        MONGODB_DB: 'iam_sessions_bootstrap',
+        JWKS_CACHE_TTL_MS: '299999',
+        JWKS_GRACE_PERIOD_MS: '300000',
+      },
+      { esperarSubir: true },
+    );
+
+    expect(resultado.saida).toContain('boot.listening');
+  });
+
   it('não vaza o valor da variável na saída fatal', async () => {
     const resultado = await executarServidor({
       NODE_ENV: 'test',

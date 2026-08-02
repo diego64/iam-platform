@@ -15,4 +15,13 @@ export {
   medidorDeJwksNulo,
   type MedidorDeJwks,
 } from './metrics/jwks.metrics.js';
-export type { ChaveJwks, JwkPublica, StatusDaChave } from './types/jwks.types.js';
+export {
+  criarKeyRotationService,
+  type KeyRotationService,
+  type ConfiguracaoDeRotacao,
+  type MotivoDeRotacao,
+} from './services/key-rotation.service.js';
+export { criarAgendadorDeRotacao, type AgendadorDeRotacao } from './services/rotation-scheduler.js';
+export { registrarRotasDeChaves } from './routes/keys-admin.routes.js';
+export { ErroDeRotacao, type CodigoDeErroDeRotacao } from './errors/rotation.errors.js';
+export type { ChaveJwks, JwkPublica, MetadadosDeChave, StatusDaChave } from './types/jwks.types.js';
