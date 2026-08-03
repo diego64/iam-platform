@@ -225,3 +225,22 @@ describe('construirModulos — revogação de sessões', () => {
     );
   });
 });
+
+describe('construirModulos — medidores de telemetria', () => {
+  // Com telemetria ligada, cada serviço recebe seu medidor. O risco aqui não é o número que
+  // sai, é a construção quebrar no boot de um ambiente que tem métricas e outro não.
+  it('constrói todos os serviços com os medidores ligados', () => {
+    const modulos = construirModulos({
+      env: envDeTeste(),
+      ...conexoesFalsas(),
+      logger: criarLogger({ nivel: 'fatal' }),
+      metricas: true,
+    });
+
+    expect(modulos.auth.authService).toBeDefined();
+    expect(modulos.refresh.refreshTokenService).toBeDefined();
+    expect(modulos.clientes.service).toBeDefined();
+    expect(modulos.chaves?.rotacao).toBeDefined();
+    expect(modulos.users.medidor).toBeDefined();
+  });
+});
