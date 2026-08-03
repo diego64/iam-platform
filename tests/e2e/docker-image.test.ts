@@ -11,6 +11,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { execFileSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { Pool } from 'pg';
+import { urlPostgresDeTeste } from '../integration/helpers/ambiente.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -238,6 +240,18 @@ if (podeRodar && !temBancos) {
 describe.skipIf(!podeRodar || !temBancos)('imagem de produção — ciclo de vida', () => {
   beforeAll(async () => {
     await execFileAsync('docker', ['rm', '-f', CONTAINER]).catch(() => undefined);
+
+    // Banco zerado antes de subir a imagem. As suítes de integração compartilham este
+    // PostgreSQL e deixam para trás dois estados que derrubariam este caso por herança, e
+    // não por defeito da imagem: uma chave `active` que o container — que sobe sem
+    // MASTER_KEY — não consegue decifrar, e tabelas removidas por um `afterAll` enquanto o
+    // `schema_migrations` continua dizendo que a migração já rodou. Zerando o schema, o
+    // próprio `migrate` da imagem reconstrói tudo, que é o cenário de instalação nova.
+    const pool = new Pool({ connectionString: urlPostgresDeTeste(), max: 1 });
+    await pool.query('DROP SCHEMA public CASCADE');
+    await pool.query('CREATE SCHEMA public');
+    await pool.end();
+
     await docker(
       'run',
       '-d',
@@ -285,6 +299,26 @@ describe.skipIf(!podeRodar || !temBancos)('imagem de produção — ciclo de vid
     expect(corpo).toContain('"status":"ok"');
     expect(saudavel).toBe('healthy');
   }, 60_000);
+
+  // A imagem servia quatro rotas: /health/*, /metrics e o JWKS. Login, usuários e o resto
+  // existiam no código e não eram alcançáveis por ninguém em produção.
+  it('serve as rotas dos módulos, não só as de infraestrutura', async () => {
+    const resposta = await fetch(`http://127.0.0.1:${String(PORTA)}/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'ninguem@iam.local', senha: 'S3nh@Errada!' }),
+    });
+
+    // 401 e não 404: a rota existe, chegou ao handler e recusou a credencial.
+    expect(resposta.status).toBe(401);
+  }, 30_000);
+
+  it('registra o inventário de rotas no log do container', async () => {
+    const logs = await docker('logs', CONTAINER);
+
+    expect(logs).toContain('boot.rotas');
+    expect(logs).toContain('POST /auth/login');
+  }, 30_000);
 
   it('encerra com código 0 ao receber SIGTERM', async () => {
     await docker('stop', CONTAINER);

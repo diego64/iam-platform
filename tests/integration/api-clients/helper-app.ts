@@ -33,8 +33,8 @@ import {
   criarRepositorioDeAutenticacao,
   criarRepositorioDeDenylist,
   criarVerificadorDeAccessToken,
-  criarRefreshTokenStub,
 } from '../../../src/modules/auth/index.js';
+import { criarRefreshTokenFalso } from '../../mocks/refresh-token.js';
 import { criarGuardsDeAutorizacao } from '../../../src/modules/rbac/index.js';
 import {
   registrarRotasDeClientes,
@@ -111,7 +111,7 @@ export async function montarAppDeClientes(opcoes: {
     repo: criarRepositorioDeAutenticacao(opcoes.pool),
     servicoDeSenha,
     tokenService,
-    refreshToken: criarRefreshTokenStub(),
+    refreshToken: criarRefreshTokenFalso(),
     denylist,
   });
   const verificarAccessToken = criarVerificadorDeAccessToken({

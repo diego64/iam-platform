@@ -38,8 +38,8 @@ import {
   criarRepositorioDeAutenticacao,
   criarRepositorioDeDenylist,
   criarVerificadorDeAccessToken,
-  criarRefreshTokenStub,
 } from '../../../src/modules/auth/index.js';
+import { criarRefreshTokenFalso } from '../../mocks/refresh-token.js';
 import { criarGuardsDeAutorizacao } from '../../../src/modules/rbac/index.js';
 
 const TIPO_PROBLEM_JSON = 'application/problem+json';
@@ -114,7 +114,7 @@ export async function montarAppDeChaves(opcoes: {
     repo: criarRepositorioDeAutenticacao(opcoes.pool),
     servicoDeSenha,
     tokenService,
-    refreshToken: criarRefreshTokenStub(),
+    refreshToken: criarRefreshTokenFalso(),
     denylist,
   });
   const verificarAccessToken = criarVerificadorDeAccessToken({

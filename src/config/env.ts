@@ -32,6 +32,21 @@ function booleanoDeAmbiente(padrao: boolean): z.ZodEffects<z.ZodOptional<z.ZodSt
 }
 
 /**
+ * `true` se o valor é uma origem — esquema + host (+ porta), sem caminho nem barra final.
+ *
+ * O `@fastify/cors` compara a origem da requisição por igualdade estrita. Uma entrada com
+ * caminho ou barra sobrando nunca casa com nada: o CORS ficaria fechado enquanto a
+ * configuração diz que está aberto, e o sintoma aparece só no navegador de quem chama.
+ */
+function ehOrigemValida(valor: string): boolean {
+  try {
+    return new URL(valor).origin === valor;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Contrato de telemetria, isolado porque é lido duas vezes: no schema geral,
  * junto do resto da configuração, e no módulo de telemetria — que roda antes do
  * `carregarEnv()` e não pode depender das variáveis obrigatórias de banco já existirem.
@@ -234,6 +249,21 @@ export const esquemaEnv = z.object({
     .min(1000)
     .max(60 * 60 * 1000)
     .default(60 * 1000),
+
+  // Origens que o navegador pode usar para chamar esta API, separadas por vírgula.
+  // Default vazio = nenhuma origem liberada: um IdP não tem front próprio por definição, e
+  // liberar antes de saber quem consome é entregar o endpoint de login a qualquer página.
+  // Abrir é decisão explícita de quem opera, origem por origem.
+  CORS_ALLOWED_ORIGINS: z
+    .string()
+    .default('')
+    .transform((valor) =>
+      valor
+        .split(',')
+        .map((origem) => origem.trim())
+        .filter((origem) => origem !== ''),
+    )
+    .refine((origens) => origens.every(ehOrigemValida)),
 
   // Admin de bootstrap (SPEC 002). Opcionais: presentes, o server cria o primeiro admin
   // na subida (idempotente); ausentes, nada acontece. A senha nunca é logada — só o nome

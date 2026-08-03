@@ -23,10 +23,10 @@ import {
   criarJwksService,
   criarRepositorioJwks,
   criarMedidorDeJwks,
-  criarKeyRotationService,
   criarAgendadorDeRotacao,
 } from './modules/jwks/index.js';
 import { criarEncerrador } from './bootstrap/shutdown.js';
+import { construirModulos } from './bootstrap/composicao.js';
 import { construirApp } from './app.js';
 import { obterInstrumentos } from './telemetry/metricas.js';
 import { criarServicoDeProntidao } from './modules/health/services/prontidao.service.js';
@@ -82,32 +82,6 @@ async function iniciar(): Promise<void> {
     process.exit(1);
   }
 
-  // Rotação agendada. Só age se houver MASTER_KEY: sem ela não há como cifrar a privada da
-  // chave nova, e a instância já subiu porque ainda não existe chave alguma a decifrar.
-  // Com N réplicas, todas rodam o timer e o advisory lock decide qual rotaciona.
-  const agendadorDeRotacao =
-    env.MASTER_KEY === undefined
-      ? undefined
-      : criarAgendadorDeRotacao({
-          rotacao: criarKeyRotationService({
-            repo: repoJwks,
-            masterKey: env.MASTER_KEY,
-            logger,
-            invalidarCache: () => {
-              jwks.invalidar();
-            },
-            graceMs: env.JWKS_GRACE_PERIOD_MS,
-            prepublicacaoMinMs: env.JWKS_PREPUBLISH_MIN_MS,
-            purgaAposMs: env.JWKS_PURGE_AFTER_MS,
-            ...(medidorDeJwks === undefined ? {} : { medidor: medidorDeJwks }),
-          }),
-          logger,
-          habilitado: env.JWKS_ROTATION_ENABLED,
-          intervaloMs: env.JWKS_ROTATION_CHECK_INTERVAL_MS,
-          idadeMaximaMs: env.JWKS_ROTATION_MAX_AGE_MS,
-        });
-  agendadorDeRotacao?.iniciar();
-
   let mongo;
   let banco;
   try {
@@ -149,7 +123,46 @@ async function iniciar(): Promise<void> {
     logger,
   });
 
-  const app = await construirApp(env, { prontidao, telemetria, jwks });
+  // Toda a fiação da aplicação num lugar só, chamada uma vez. O app recebe serviços
+  // prontos: ele registra rotas, não conhece `pg` nem `mongodb`.
+  const modulos = construirModulos({
+    env,
+    pool,
+    banco,
+    jwks,
+    repoJwks,
+    logger,
+    metricas: medidorDeJwks !== undefined,
+  });
+
+  // Rotação agendada. Só existe se houver MASTER_KEY: sem ela não há como cifrar a privada
+  // da chave nova, e a instância já subiu porque ainda não existe chave alguma a decifrar.
+  // Com N réplicas, todas rodam o timer e o advisory lock decide qual rotaciona. O serviço
+  // é o mesmo que serve `/admin/keys` — dois deles seriam duas ideias de janela de graça.
+  const agendadorDeRotacao =
+    modulos.chaves === undefined
+      ? undefined
+      : criarAgendadorDeRotacao({
+          rotacao: modulos.chaves.rotacao,
+          logger,
+          habilitado: env.JWKS_ROTATION_ENABLED,
+          intervaloMs: env.JWKS_ROTATION_CHECK_INTERVAL_MS,
+          idadeMaximaMs: env.JWKS_ROTATION_MAX_AGE_MS,
+        });
+  agendadorDeRotacao?.iniciar();
+
+  const app = await construirApp(env, { prontidao, telemetria, jwks, modulos });
+
+  // Inventário do que esta instância serve. Existe para a pergunta que só aparece durante
+  // um incidente — "esta réplica tem a rota nova?" — ser respondida pelo log da própria
+  // instância, e não por dedução a partir da versão da imagem.
+  logger.info(
+    {
+      total: app.inventarioDeRotas.length,
+      rotas: app.inventarioDeRotas.map((rota) => `${rota.metodo} ${rota.caminho}`),
+    },
+    'boot.rotas',
+  );
 
   // Handlers ANTES do listen. Registrá-los depois deixa uma janela em que o processo
   // já aceita conexões mas ainda usa o comportamento default de SIGTERM: morte
@@ -170,7 +183,15 @@ async function iniciar(): Promise<void> {
       agendadorDeRotacao?.parar();
     },
     encerrarProcesso: (codigo) => {
-      process.exit(codigo);
+      // No caminho feliz o processo sai sozinho: com o servidor, os bancos e a telemetria
+      // fechados, o loop de eventos esvazia e o Node encerra com este código — descarregando
+      // o que o Pino ainda tem em buffer. `process.exit` cortaria justamente as últimas
+      // linhas, entre elas a que prova que o dreno terminou.
+      //
+      // No caminho de falha (ou de estouro do prazo) a saída continua dura: ali a premissa é
+      // que alguma coisa travou, e esperar o loop esvaziar seria esperar para sempre.
+      process.exitCode = codigo;
+      if (codigo !== 0) process.exit(codigo);
     },
   });
 

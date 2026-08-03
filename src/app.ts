@@ -1,14 +1,16 @@
 /**
- * Responsabilidade: montar a instância do Fastify — provider do Zod, Swagger, handler
- * global de erros e registro dos módulos.
+ * Responsabilidade: montar a instância do Fastify — provider do Zod, Swagger, plugins de
+ * borda, handler global de erros e registro dos módulos.
  * Consumido por: server.ts e testes de integração (Supertest usa o app sem listen).
- * Regras: recebe a configuração por injeção; nunca lê process.env nem abre socket.
- *
- * Escopo helmet, cors restrito e rate limit global são aplicados no server.ts, que é o entrypoint do processo.
+ * Regras: recebe a configuração e os serviços por injeção; nunca lê process.env, nunca
+ *         abre socket e nunca conhece `pg` ou `mongodb`.
  */
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import fastifySwagger from '@fastify/swagger';
 import fastifySwaggerUi from '@fastify/swagger-ui';
+import fastifyRateLimit from '@fastify/rate-limit';
+import fastifyHelmet from '@fastify/helmet';
+import fastifyCors from '@fastify/cors';
 import {
   jsonSchemaTransform,
   serializerCompiler,
@@ -26,8 +28,37 @@ import { rotaIsenta } from './telemetry/rotas-isentas.js';
 import { registrarRotaDeMetrics } from './modules/metrics/index.js';
 import { registrarRotasDeJwks } from './modules/jwks/index.js';
 import type { JwksService } from './modules/jwks/index.js';
+import type { ModulosDaAplicacao } from './bootstrap/composicao.js';
+import type { VerificadorDeAccessToken } from './modules/auth/index.js';
+import { registrarRotasDeAuth } from './modules/auth/index.js';
+import { registrarRotasDeRefresh } from './modules/refresh-token/index.js';
+import { registrarRotasDeSenha } from './modules/password/index.js';
+import type { DependenciasDoController as DependenciasDeSenha } from './modules/password/index.js';
+import { registrarRotasDeUsuario } from './modules/users/index.js';
+import type { DependenciasDoController as DependenciasDeUsuarios } from './modules/users/index.js';
+import { registrarRotasDeRbac } from './modules/rbac/index.js';
+import { registrarRotasDeAbac } from './modules/abac/index.js';
+import { registrarRotasDeClientes } from './modules/api-clients/index.js';
+import { registrarRotasDeChaves } from './modules/jwks/index.js';
 
 const TIPO_PROBLEM_JSON = 'application/problem+json';
+
+/** Uma rota efetivamente registrada nesta instância. */
+export interface RotaRegistrada {
+  readonly metodo: string;
+  readonly caminho: string;
+}
+
+declare module 'fastify' {
+  interface FastifyInstance {
+    /**
+     * O que esta instância serve, na ordem de registro. Alimenta o log de inventário do
+     * boot e o teste de contrato que compara o servido com o documentado — as duas coisas
+     * precisam da lista real, não de uma lista escrita à mão que envelhece sozinha.
+     */
+    readonly inventarioDeRotas: readonly RotaRegistrada[];
+  }
+}
 
 /**
  * Quantos hops de proxy confiar ao derivar `request.ip` do `X-Forwarded-For`.
@@ -65,6 +96,62 @@ export interface DependenciasDoApp {
    * testes que só exercitam outras rotas não precisam de chaves nem de banco.
    */
   readonly jwks?: JwksService;
+  /**
+   * Serviços de cada módulo, vindos do composition root. Ausentes, o app sobe servindo só
+   * o que não depende de banco (health, metrics, jwks) — não é conveniência, é requisito:
+   * dezenas de testes exercitam o handler de erro ou o 404 sem PostgreSQL por perto.
+   */
+  readonly modulos?: ModulosDaAplicacao;
+}
+
+/** Única rota de senha que exige token — as outras existem justamente para quem não tem. */
+const ROTA_DE_TROCA_DE_SENHA = '/auth/password/change';
+
+/**
+ * Registra as rotas de senha num escopo próprio, com o access token verificado apenas na
+ * troca autenticada.
+ *
+ * `forgot`, `reset` e `policy` são públicas por definição: quem esqueceu a senha não tem
+ * token para apresentar. Um hook valendo para o escopo inteiro fecharia as três, então o
+ * preHandler decide pela rota.
+ *
+ * ponytail: uma comparação de caminho. Vira lista quando existir a segunda rota de senha
+ * autenticada.
+ */
+async function registrarModuloDeSenha(
+  app: FastifyInstance,
+  deps: DependenciasDeSenha,
+  verificarAccessToken: VerificadorDeAccessToken,
+): Promise<void> {
+  await app.register((escopo, _opcoes, pronto) => {
+    escopo.addHook('preHandler', async (requisicao, resposta) => {
+      if (requisicao.routeOptions.url === ROTA_DE_TROCA_DE_SENHA) {
+        await verificarAccessToken(requisicao, resposta);
+      }
+    });
+    registrarRotasDeSenha(escopo, deps);
+    pronto();
+  });
+}
+
+/**
+ * Registra as rotas de usuário num escopo com o access token verificado em todas elas.
+ *
+ * As sete são administrativas e o módulo autoriza por dentro do controller, através da
+ * porta `AutorizadorAdmin` — que é síncrona e lê `requisicao.usuario`. Quem popula esse
+ * campo é o verificador, e ele precisa rodar antes: sem o hook, o autorizador veria
+ * requisição nenhuma autenticada e recusaria todas por falta de token.
+ */
+async function registrarModuloDeUsuarios(
+  app: FastifyInstance,
+  deps: DependenciasDeUsuarios,
+  verificarAccessToken: VerificadorDeAccessToken,
+): Promise<void> {
+  await app.register((escopo, _opcoes, pronto) => {
+    escopo.addHook('preHandler', verificarAccessToken);
+    registrarRotasDeUsuario(escopo, deps);
+    pronto();
+  });
 }
 
 /** Prontidão degenerada: usada quando o app sobe sem dependências injetadas. */
@@ -123,6 +210,18 @@ export async function construirApp(
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
 
+  const inventarioDeRotas: RotaRegistrada[] = [];
+  app.decorate('inventarioDeRotas', inventarioDeRotas);
+  app.addHook('onRoute', (opcoes) => {
+    const metodos = Array.isArray(opcoes.method) ? opcoes.method : [opcoes.method];
+    for (const metodo of metodos) {
+      // O Fastify cria um HEAD para cada GET. Ele não é superfície declarada por ninguém:
+      // entraria no inventário sem nunca aparecer no OpenAPI, e o contrato acusaria uma
+      // divergência que não existe.
+      if (metodo !== 'HEAD') inventarioDeRotas.push({ metodo, caminho: opcoes.url });
+    }
+  });
+
   await app.register(fastifySwagger, {
     openapi: {
       info: { title: 'iam-platform', version: '0.1.0' },
@@ -142,6 +241,25 @@ export async function construirApp(
   if (env.NODE_ENV !== 'production') {
     await app.register(fastifySwaggerUi, { routePrefix: '/docs' });
   }
+
+  /**
+   * `global: false`: o teto é por rota, declarado onde a rota é definida — login merece um
+   * número mais apertado que a leitura de papéis, e um limite único esconderia isso atrás
+   * de uma média, ainda contando requisição de health check.
+   *
+   * Precisa vir ANTES de qualquer rota: uma rota que declara `config.rateLimit` sem o
+   * plugin registrado **falha no registro**, e o processo não sobe.
+   */
+  await app.register(fastifyRateLimit, { global: false });
+
+  await app.register(fastifyHelmet);
+
+  // Origem fechada por default. `origin: false` não emite cabeçalho de liberação nenhum,
+  // então o navegador barra qualquer página que tente chamar esta API — que é o estado
+  // correto para um IdP sem front conhecido.
+  await app.register(fastifyCors, {
+    origin: env.CORS_ALLOWED_ORIGINS.length === 0 ? false : [...env.CORS_ALLOWED_ORIGINS],
+  });
 
   /**
    * Handler global: toda saída de erro sai como problem+json.
@@ -198,6 +316,23 @@ export async function construirApp(
 
   if (dependencias.jwks !== undefined) {
     registrarRotasDeJwks(app, { jwks: dependencias.jwks });
+  }
+
+  const modulos = dependencias.modulos;
+  if (modulos !== undefined) {
+    registrarRotasDeAuth(app, modulos.auth);
+    registrarRotasDeRefresh(app, modulos.refresh);
+    await registrarModuloDeSenha(app, modulos.senha, modulos.auth.verificarAccessToken);
+    await registrarModuloDeUsuarios(app, modulos.users, modulos.auth.verificarAccessToken);
+    registrarRotasDeRbac(app, modulos.rbac);
+    registrarRotasDeAbac(app, modulos.abac);
+    registrarRotasDeClientes(app, modulos.clientes);
+
+    // Ausente quando não há segredo mestre: sem ele o serviço de rotação não existe, e as
+    // rotas administrativas de chave não teriam o que servir.
+    if (modulos.chaves !== undefined) {
+      registrarRotasDeChaves(app, modulos.chaves);
+    }
   }
 
   await app.ready();
