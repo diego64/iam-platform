@@ -48,5 +48,16 @@ export async function montarAppCompleto(env: Env = envCompleta()): Promise<Fasti
     logger: criarLogger({ nivel: 'fatal' }),
   });
 
-  return construirApp(env, { jwks, modulos });
+  // Exportador de mentira só para `GET /metrics` existir: a rota é condicional à
+  // telemetria, e sem ela a superfície servida ficaria menor que a documentada por um
+  // motivo que não tem nada a ver com montagem de módulo.
+  const telemetria = {
+    ativa: true,
+    metricas: true,
+    traces: false,
+    exportadorPrometheus: {} as never,
+    encerrar: () => Promise.resolve(),
+  };
+
+  return construirApp(env, { jwks, modulos, telemetria });
 }
