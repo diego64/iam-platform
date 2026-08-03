@@ -183,7 +183,15 @@ async function iniciar(): Promise<void> {
       agendadorDeRotacao?.parar();
     },
     encerrarProcesso: (codigo) => {
-      process.exit(codigo);
+      // No caminho feliz o processo sai sozinho: com o servidor, os bancos e a telemetria
+      // fechados, o loop de eventos esvazia e o Node encerra com este código — descarregando
+      // o que o Pino ainda tem em buffer. `process.exit` cortaria justamente as últimas
+      // linhas, entre elas a que prova que o dreno terminou.
+      //
+      // No caminho de falha (ou de estouro do prazo) a saída continua dura: ali a premissa é
+      // que alguma coisa travou, e esperar o loop esvaziar seria esperar para sempre.
+      process.exitCode = codigo;
+      if (codigo !== 0) process.exit(codigo);
     },
   });
 
