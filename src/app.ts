@@ -34,6 +34,10 @@ import { registrarRotasDeAuth } from './modules/auth/index.js';
 import { registrarRotasDeRefresh } from './modules/refresh-token/index.js';
 import { registrarRotasDeSenha } from './modules/password/index.js';
 import type { DependenciasDoController as DependenciasDeSenha } from './modules/password/index.js';
+import { registrarRotasDeUsuario } from './modules/users/index.js';
+import type { DependenciasDoController as DependenciasDeUsuarios } from './modules/users/index.js';
+import { registrarRotasDeRbac } from './modules/rbac/index.js';
+import { registrarRotasDeAbac } from './modules/abac/index.js';
 
 const TIPO_PROBLEM_JSON = 'application/problem+json';
 
@@ -107,6 +111,26 @@ async function registrarModuloDeSenha(
       }
     });
     registrarRotasDeSenha(escopo, deps);
+    pronto();
+  });
+}
+
+/**
+ * Registra as rotas de usuário num escopo com o access token verificado em todas elas.
+ *
+ * As sete são administrativas e o módulo autoriza por dentro do controller, através da
+ * porta `AutorizadorAdmin` — que é síncrona e lê `requisicao.usuario`. Quem popula esse
+ * campo é o verificador, e ele precisa rodar antes: sem o hook, o autorizador veria
+ * requisição nenhuma autenticada e recusaria todas por falta de token.
+ */
+async function registrarModuloDeUsuarios(
+  app: FastifyInstance,
+  deps: DependenciasDeUsuarios,
+  verificarAccessToken: VerificadorDeAccessToken,
+): Promise<void> {
+  await app.register((escopo, _opcoes, pronto) => {
+    escopo.addHook('preHandler', verificarAccessToken);
+    registrarRotasDeUsuario(escopo, deps);
     pronto();
   });
 }
@@ -268,6 +292,9 @@ export async function construirApp(
     registrarRotasDeAuth(app, modulos.auth);
     registrarRotasDeRefresh(app, modulos.refresh);
     await registrarModuloDeSenha(app, modulos.password, modulos.auth.verificarAccessToken);
+    await registrarModuloDeUsuarios(app, modulos.users, modulos.auth.verificarAccessToken);
+    registrarRotasDeRbac(app, modulos.rbac);
+    registrarRotasDeAbac(app, modulos.abac);
   }
 
   await app.ready();

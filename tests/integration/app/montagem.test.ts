@@ -147,3 +147,57 @@ describe('app com os módulos de autenticação, refresh e senha', () => {
     expect(resposta.statusCode).toBe(200);
   });
 });
+
+describe('app com os módulos de usuários, RBAC e ABAC', () => {
+  it.each([
+    ['POST', '/users'],
+    ['GET', '/users'],
+    ['GET', '/users/:id'],
+    ['PATCH', '/users/:id'],
+    ['DELETE', '/users/:id'],
+    ['POST', '/users/:id/block'],
+    ['POST', '/users/:id/unblock'],
+    ['POST', '/roles'],
+    ['GET', '/roles'],
+    ['GET', '/roles/:id'],
+    ['PATCH', '/roles/:id'],
+    ['DELETE', '/roles/:id'],
+    ['POST', '/roles/:id/permissions'],
+    ['DELETE', '/roles/:id/permissions/:permId'],
+    ['POST', '/permissions'],
+    ['GET', '/permissions'],
+    ['DELETE', '/permissions/:id'],
+    ['GET', '/users/:id/roles'],
+    ['POST', '/users/:id/roles'],
+    ['DELETE', '/users/:id/roles/:roleId'],
+    ['POST', '/policies'],
+    ['GET', '/policies'],
+    ['GET', '/policies/:id'],
+    ['PATCH', '/policies/:id'],
+    ['DELETE', '/policies/:id'],
+    ['POST', '/policies/evaluate'],
+  ] as const)('registra %s %s', (metodo, caminho) => {
+    expect(appCompleto.hasRoute({ method: metodo, url: caminho })).toBe(true);
+  });
+
+  // O autorizador do módulo de usuário lê `requisicao.usuario`, que só existe depois do
+  // verificador. Sem o hook do escopo, ele recusaria tudo por falta de token — e um 401
+  // aqui é a prova de que o verificador rodou, não de que ninguém checou nada.
+  it('rota administrativa de usuário sem Bearer responde 401', async () => {
+    const resposta = await appCompleto.inject({ method: 'GET', url: '/users' });
+
+    expect(resposta.statusCode).toBe(401);
+  });
+
+  it('rota de RBAC sem Bearer responde 401', async () => {
+    const resposta = await appCompleto.inject({ method: 'GET', url: '/roles' });
+
+    expect(resposta.statusCode).toBe(401);
+  });
+
+  it('rota de ABAC sem Bearer responde 401', async () => {
+    const resposta = await appCompleto.inject({ method: 'GET', url: '/policies' });
+
+    expect(resposta.statusCode).toBe(401);
+  });
+});
