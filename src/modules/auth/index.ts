@@ -19,5 +19,4 @@ export {
   medidorDeAuthNulo,
   type MedidorDeAuth,
 } from './metrics/auth.metrics.js';
-export { criarRefreshTokenStub } from './services/refresh-token.stub.js';
 export type { PortaDeRefreshToken } from './interfaces/refresh-token.port.js';

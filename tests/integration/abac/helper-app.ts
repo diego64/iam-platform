@@ -37,8 +37,8 @@ import {
   criarRepositorioDeAutenticacao,
   criarRepositorioDeDenylist,
   criarVerificadorDeAccessToken,
-  criarRefreshTokenStub,
 } from '../../../src/modules/auth/index.js';
+import { criarRefreshTokenFalso } from '../../mocks/refresh-token.js';
 import {
   registrarRotasDeRbac,
   criarGuardsDeAutorizacao,
@@ -127,7 +127,7 @@ export async function montarAppDeAbac(opcoes: {
     repo: repoAuth,
     servicoDeSenha,
     tokenService,
-    refreshToken: criarRefreshTokenStub(),
+    refreshToken: criarRefreshTokenFalso(),
     denylist,
   });
   const verificarAccessToken = criarVerificadorDeAccessToken({
