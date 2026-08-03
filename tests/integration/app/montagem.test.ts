@@ -6,7 +6,7 @@
  * se prova é a montagem, não o comportamento de cada rota.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { construirApp } from '../../../src/app.js';
 import { carregarEnv, type Env } from '../../../src/config/env.js';
 import { envCompleta, montarAppCompleto } from '../../mocks/app-completo.js';
@@ -241,5 +241,38 @@ describe('app com os módulos de clientes de API e de chaves', () => {
     expect(semSegredo.hasRoute({ method: 'GET', url: '/clients' })).toBe(true);
 
     await semSegredo.close();
+  });
+});
+
+describe('rate limit no app real', () => {
+  // O teto do login existe desde a SPEC 001 e nunca valeu no processo: sem o plugin, a
+  // config da rota era um objeto que ninguém lia. Aqui ela vale.
+  it('login acima do teto responde 429 com Retry-After', async () => {
+    const doMesmoIp = (): Promise<LightMyRequestResponse> =>
+      appCompleto.inject({
+        method: 'POST',
+        url: '/auth/login',
+        remoteAddress: '10.55.0.1',
+        payload: { email: 'ninguem@iam.local', senha: 'S3nh@Qualquer!' },
+      });
+
+    let ultima = await doMesmoIp();
+    for (let tentativa = 0; tentativa < 6 && ultima.statusCode !== 429; tentativa += 1) {
+      ultima = await doMesmoIp();
+    }
+
+    expect(ultima.statusCode).toBe(429);
+    expect(ultima.headers['retry-after']).toBeDefined();
+  });
+
+  it('outro IP não herda o teto já estourado', async () => {
+    const resposta = await appCompleto.inject({
+      method: 'POST',
+      url: '/auth/login',
+      remoteAddress: '10.55.0.2',
+      payload: { email: 'ninguem@iam.local', senha: 'S3nh@Qualquer!' },
+    });
+
+    expect(resposta.statusCode).not.toBe(429);
   });
 });
