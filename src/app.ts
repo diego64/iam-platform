@@ -322,7 +322,7 @@ export async function construirApp(
   if (modulos !== undefined) {
     registrarRotasDeAuth(app, modulos.auth);
     registrarRotasDeRefresh(app, modulos.refresh);
-    await registrarModuloDeSenha(app, modulos.password, modulos.auth.verificarAccessToken);
+    await registrarModuloDeSenha(app, modulos.senha, modulos.auth.verificarAccessToken);
     await registrarModuloDeUsuarios(app, modulos.users, modulos.auth.verificarAccessToken);
     registrarRotasDeRbac(app, modulos.rbac);
     registrarRotasDeAbac(app, modulos.abac);

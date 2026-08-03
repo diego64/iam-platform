@@ -113,7 +113,7 @@ export interface DependenciasDaComposicao {
 export interface ModulosDaAplicacao {
   readonly auth: DependenciasDasRotasDeAuth;
   readonly refresh: DependenciasDasRotasDeRefresh;
-  readonly password: DependenciasDeSenha;
+  readonly senha: DependenciasDeSenha;
   readonly users: DependenciasDeUsuarios;
   readonly rbac: DependenciasDasRotasDeRbac;
   readonly abac: DependenciasDasRotasDeAbac;
@@ -242,7 +242,7 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
   return {
     auth: { authService, verificarAccessToken },
     refresh: { refreshTokenService },
-    password: { passwordService, autenticar: idAutenticado },
+    senha: { passwordService, autenticar: idAutenticado },
     users: {
       userService: criarUserService({ repositorio: repoUsuarios, servicoDeSenha, sessoes }),
       autorizador: criarAutorizadorDeAdministracao(),

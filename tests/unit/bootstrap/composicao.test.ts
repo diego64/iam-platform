@@ -114,7 +114,7 @@ describe('construirModulos — grupos devolvidos', () => {
 
     expect(modulos.auth.authService).toBeDefined();
     expect(modulos.refresh.refreshTokenService).toBeDefined();
-    expect(modulos.password.passwordService).toBeDefined();
+    expect(modulos.senha.passwordService).toBeDefined();
     expect(modulos.users.userService).toBeDefined();
     expect(modulos.rbac.rbacService).toBeDefined();
     expect(modulos.rbac.assignmentService).toBeDefined();
