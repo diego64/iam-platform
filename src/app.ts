@@ -1,14 +1,16 @@
 /**
- * Responsabilidade: montar a instância do Fastify — provider do Zod, Swagger, handler
- * global de erros e registro dos módulos.
+ * Responsabilidade: montar a instância do Fastify — provider do Zod, Swagger, plugins de
+ * borda, handler global de erros e registro dos módulos.
  * Consumido por: server.ts e testes de integração (Supertest usa o app sem listen).
- * Regras: recebe a configuração por injeção; nunca lê process.env nem abre socket.
- *
- * Escopo helmet, cors restrito e rate limit global são aplicados no server.ts, que é o entrypoint do processo.
+ * Regras: recebe a configuração e os serviços por injeção; nunca lê process.env, nunca
+ *         abre socket e nunca conhece `pg` ou `mongodb`.
  */
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import fastifySwagger from '@fastify/swagger';
 import fastifySwaggerUi from '@fastify/swagger-ui';
+import fastifyRateLimit from '@fastify/rate-limit';
+import fastifyHelmet from '@fastify/helmet';
+import fastifyCors from '@fastify/cors';
 import {
   jsonSchemaTransform,
   serializerCompiler,
@@ -142,6 +144,25 @@ export async function construirApp(
   if (env.NODE_ENV !== 'production') {
     await app.register(fastifySwaggerUi, { routePrefix: '/docs' });
   }
+
+  /**
+   * `global: false`: o teto é por rota, declarado onde a rota é definida — login merece um
+   * número mais apertado que a leitura de papéis, e um limite único esconderia isso atrás
+   * de uma média, ainda contando requisição de health check.
+   *
+   * Precisa vir ANTES de qualquer rota: uma rota que declara `config.rateLimit` sem o
+   * plugin registrado **falha no registro**, e o processo não sobe.
+   */
+  await app.register(fastifyRateLimit, { global: false });
+
+  await app.register(fastifyHelmet);
+
+  // Origem fechada por default. `origin: false` não emite cabeçalho de liberação nenhum,
+  // então o navegador barra qualquer página que tente chamar esta API — que é o estado
+  // correto para um IdP sem front conhecido.
+  await app.register(fastifyCors, {
+    origin: env.CORS_ALLOWED_ORIGINS.length === 0 ? false : [...env.CORS_ALLOWED_ORIGINS],
+  });
 
   /**
    * Handler global: toda saída de erro sai como problem+json.
