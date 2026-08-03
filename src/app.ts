@@ -43,6 +43,23 @@ import { registrarRotasDeChaves } from './modules/jwks/index.js';
 
 const TIPO_PROBLEM_JSON = 'application/problem+json';
 
+/** Uma rota efetivamente registrada nesta instância. */
+export interface RotaRegistrada {
+  readonly metodo: string;
+  readonly caminho: string;
+}
+
+declare module 'fastify' {
+  interface FastifyInstance {
+    /**
+     * O que esta instância serve, na ordem de registro. Alimenta o log de inventário do
+     * boot e o teste de contrato que compara o servido com o documentado — as duas coisas
+     * precisam da lista real, não de uma lista escrita à mão que envelhece sozinha.
+     */
+    readonly inventarioDeRotas: readonly RotaRegistrada[];
+  }
+}
+
 /**
  * Quantos hops de proxy confiar ao derivar `request.ip` do `X-Forwarded-For`.
  *
@@ -192,6 +209,18 @@ export async function construirApp(
 
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
+
+  const inventarioDeRotas: RotaRegistrada[] = [];
+  app.decorate('inventarioDeRotas', inventarioDeRotas);
+  app.addHook('onRoute', (opcoes) => {
+    const metodos = Array.isArray(opcoes.method) ? opcoes.method : [opcoes.method];
+    for (const metodo of metodos) {
+      // O Fastify cria um HEAD para cada GET. Ele não é superfície declarada por ninguém:
+      // entraria no inventário sem nunca aparecer no OpenAPI, e o contrato acusaria uma
+      // divergência que não existe.
+      if (metodo !== 'HEAD') inventarioDeRotas.push({ metodo, caminho: opcoes.url });
+    }
+  });
 
   await app.register(fastifySwagger, {
     openapi: {

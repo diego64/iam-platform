@@ -41,9 +41,14 @@ interface Resultado {
  */
 async function executarServidor(
   ambiente: Record<string, string>,
-  opcoes: { readonly esperarSubir?: boolean; readonly timeoutMs?: number } = {},
+  opcoes: {
+    readonly esperarSubir?: boolean;
+    readonly timeoutMs?: number;
+    /** Roda contra o processo vivo, antes do SIGTERM. Falha aqui não impede o encerramento. */
+    readonly aoSubir?: () => Promise<void>;
+  } = {},
 ): Promise<Resultado> {
-  const { esperarSubir = false, timeoutMs = 20_000 } = opcoes;
+  const { esperarSubir = false, timeoutMs = 20_000, aoSubir } = opcoes;
 
   return new Promise((resolver) => {
     const filho = spawn(process.execPath, [CAMINHO_SERVIDOR], {
@@ -53,6 +58,7 @@ async function executarServidor(
 
     let saida = '';
     let finalizado = false;
+    let encerrando = false;
 
     const encerrar = (codigo: number | null): void => {
       if (finalizado) return;
@@ -69,8 +75,11 @@ async function executarServidor(
     const acumular = (pedaco: Buffer): void => {
       saida += pedaco.toString();
       // Subiu: encerra com SIGTERM para exercitar também o shutdown gracioso.
-      if (esperarSubir && saida.includes('boot.listening')) {
-        filho.kill('SIGTERM');
+      if (esperarSubir && saida.includes('boot.listening') && !encerrando) {
+        encerrando = true;
+        void (aoSubir === undefined ? Promise.resolve() : aoSubir()).finally(() => {
+          filho.kill('SIGTERM');
+        });
       }
     };
 
@@ -121,6 +130,69 @@ describe('bootstrap — caminho feliz', () => {
     expect(resultado.saida).toContain('boot.mongo_ok');
     expect(resultado.saida).toContain('boot.indices_ok');
     expect(resultado.saida).toContain('boot.listening');
+  });
+
+  // O processo servia quatro rotas enquanto oito módulos tinham rotas implementadas e
+  // documentadas. O inventário no log é o que torna essa divergência visível de fora.
+  it('loga o inventário de rotas e serve as dos módulos, não só as de infraestrutura', async () => {
+    const porta = await portaLivre();
+    const resultado = await executarServidor(
+      {
+        NODE_ENV: 'test',
+        LOG_LEVEL: 'info',
+        PORT: String(porta),
+        POSTGRES_URL: urlPostgresDeTeste(),
+        MONGODB_URL: urlMongoDeTeste(),
+        MONGODB_DB: 'iam_sessions_bootstrap',
+      },
+      { esperarSubir: true },
+    );
+
+    expect(resultado.saida).toContain('boot.rotas');
+    for (const rota of [
+      'POST /auth/login',
+      'GET /users',
+      'POST /policies/evaluate',
+      'GET /clients',
+    ]) {
+      expect(resultado.saida).toContain(rota);
+    }
+  });
+
+  it('a rota de login responde no processo real, no mesmo servidor do health', async () => {
+    const porta = await portaLivre();
+    const respostas: number[] = [];
+    const resultado = await executarServidor(
+      {
+        NODE_ENV: 'test',
+        LOG_LEVEL: 'info',
+        PORT: String(porta),
+        POSTGRES_URL: urlPostgresDeTeste(),
+        MONGODB_URL: urlMongoDeTeste(),
+        MONGODB_DB: 'iam_sessions_bootstrap',
+      },
+      {
+        esperarSubir: true,
+        aoSubir: async () => {
+          const base = `http://127.0.0.1:${String(porta)}`;
+          respostas.push((await fetch(`${base}/health/live`)).status);
+          respostas.push(
+            (
+              await fetch(`${base}/auth/login`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ email: 'ninguem@iam.local', senha: 'S3nh@Errada!' }),
+              })
+            ).status,
+          );
+        },
+      },
+    );
+
+    expect(resultado.saida).toContain('boot.listening');
+    // 200 no liveness e 401 no login: o mesmo processo atende os dois, e o login chegou ao
+    // handler de verdade — 404 aqui era o sintoma que esta SPEC existe para eliminar.
+    expect(respostas).toEqual([200, 401]);
   });
 
   it('encerra com código 0 ao receber SIGTERM depois de subir', async () => {
