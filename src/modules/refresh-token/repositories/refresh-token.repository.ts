@@ -47,6 +47,12 @@ export interface RepositorioDeRefreshToken {
   rotacionarAtomico(tokenHash: string, agora: Date): Promise<RefreshPersistido | null>;
   /** Revoga todos os tokens ainda `active` de uma família (logout, reuso, bloqueio). */
   revogarFamilia(familyId: string): Promise<void>;
+  /**
+   * Revoga todos os tokens ainda `active` do usuário, em todas as famílias — o que
+   * bloqueio, remoção e troca de senha precisam: derrubar as sessões que existirem, sem
+   * que quem chama saiba quantas famílias o usuário tem abertas.
+   */
+  revogarDoUsuario(userId: string): Promise<void>;
 }
 
 interface LinhaMongo {
@@ -107,6 +113,13 @@ export function criarRepositorioDeRefreshToken(banco: Db): RepositorioDeRefreshT
     async revogarFamilia(familyId: string): Promise<void> {
       await colecao.updateMany(
         { family_id: familyId, status: 'active' },
+        { $set: { status: 'revoked' } },
+      );
+    },
+
+    async revogarDoUsuario(userId: string): Promise<void> {
+      await colecao.updateMany(
+        { user_id: userId, status: 'active' },
         { $set: { status: 'revoked' } },
       );
     },
