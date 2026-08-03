@@ -18,7 +18,7 @@ import type { JwksService, RepositorioJwks } from '../../src/modules/jwks/index.
 
 const MASTER = 'master-key-de-teste-com-mais-de-32-bytes';
 
-export function envCompleta(sobrescritas: Record<string, string> = {}): Env {
+export function envCompleta(sobrescritas: NodeJS.ProcessEnv = {}): Env {
   return carregarEnv({
     NODE_ENV: 'test',
     LOG_LEVEL: 'fatal',

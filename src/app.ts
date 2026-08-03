@@ -38,6 +38,8 @@ import { registrarRotasDeUsuario } from './modules/users/index.js';
 import type { DependenciasDoController as DependenciasDeUsuarios } from './modules/users/index.js';
 import { registrarRotasDeRbac } from './modules/rbac/index.js';
 import { registrarRotasDeAbac } from './modules/abac/index.js';
+import { registrarRotasDeClientes } from './modules/api-clients/index.js';
+import { registrarRotasDeChaves } from './modules/jwks/index.js';
 
 const TIPO_PROBLEM_JSON = 'application/problem+json';
 
@@ -295,6 +297,13 @@ export async function construirApp(
     await registrarModuloDeUsuarios(app, modulos.users, modulos.auth.verificarAccessToken);
     registrarRotasDeRbac(app, modulos.rbac);
     registrarRotasDeAbac(app, modulos.abac);
+    registrarRotasDeClientes(app, modulos.clientes);
+
+    // Ausente quando não há segredo mestre: sem ele o serviço de rotação não existe, e as
+    // rotas administrativas de chave não teriam o que servir.
+    if (modulos.chaves !== undefined) {
+      registrarRotasDeChaves(app, modulos.chaves);
+    }
   }
 
   await app.ready();

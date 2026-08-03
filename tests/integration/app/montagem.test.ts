@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { construirApp } from '../../../src/app.js';
 import { carregarEnv, type Env } from '../../../src/config/env.js';
-import { montarAppCompleto } from '../../mocks/app-completo.js';
+import { envCompleta, montarAppCompleto } from '../../mocks/app-completo.js';
 
 const ORIGEM_LIBERADA = 'https://app.exemplo.com';
 const ORIGEM_ESTRANHA = 'https://invasor.exemplo.com';
@@ -199,5 +199,47 @@ describe('app com os módulos de usuários, RBAC e ABAC', () => {
     const resposta = await appCompleto.inject({ method: 'GET', url: '/policies' });
 
     expect(resposta.statusCode).toBe(401);
+  });
+});
+
+describe('app com os módulos de clientes de API e de chaves', () => {
+  it.each([
+    ['POST', '/clients'],
+    ['GET', '/clients'],
+    ['GET', '/clients/:id'],
+    ['PATCH', '/clients/:id'],
+    ['DELETE', '/clients/:id'],
+    ['POST', '/clients/:id/secret'],
+    ['POST', '/clients/:id/secret/revoke-previous'],
+    ['GET', '/admin/keys'],
+    ['POST', '/admin/keys/prepare'],
+    ['POST', '/admin/keys/rotate'],
+    ['POST', '/admin/keys/:kid/revoke'],
+  ] as const)('registra %s %s', (metodo, caminho) => {
+    expect(appCompleto.hasRoute({ method: metodo, url: caminho })).toBe(true);
+  });
+
+  it('rota de clientes sem Bearer responde 401', async () => {
+    const resposta = await appCompleto.inject({ method: 'GET', url: '/clients' });
+
+    expect(resposta.statusCode).toBe(401);
+  });
+
+  it('rota administrativa de chaves sem Bearer responde 401', async () => {
+    const resposta = await appCompleto.inject({ method: 'GET', url: '/admin/keys' });
+
+    expect(resposta.statusCode).toBe(401);
+  });
+
+  // A rotação cifra a privada da chave nova com o segredo mestre. Sem ele o serviço não
+  // existe — e servir /admin/keys sem ter como rotacionar seria prometer o que não há.
+  it('sem MASTER_KEY as rotas de chave não sobem, e o resto do app sobe igual', async () => {
+    const semSegredo = await montarAppCompleto(envCompleta({ MASTER_KEY: undefined }));
+
+    expect(semSegredo.hasRoute({ method: 'GET', url: '/admin/keys' })).toBe(false);
+    expect(semSegredo.hasRoute({ method: 'POST', url: '/auth/login' })).toBe(true);
+    expect(semSegredo.hasRoute({ method: 'GET', url: '/clients' })).toBe(true);
+
+    await semSegredo.close();
   });
 });
