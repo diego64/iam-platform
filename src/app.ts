@@ -28,6 +28,12 @@ import { rotaIsenta } from './telemetry/rotas-isentas.js';
 import { registrarRotaDeMetrics } from './modules/metrics/index.js';
 import { registrarRotasDeJwks } from './modules/jwks/index.js';
 import type { JwksService } from './modules/jwks/index.js';
+import type { ModulosDaAplicacao } from './bootstrap/composicao.js';
+import type { VerificadorDeAccessToken } from './modules/auth/index.js';
+import { registrarRotasDeAuth } from './modules/auth/index.js';
+import { registrarRotasDeRefresh } from './modules/refresh-token/index.js';
+import { registrarRotasDeSenha } from './modules/password/index.js';
+import type { DependenciasDoController as DependenciasDeSenha } from './modules/password/index.js';
 
 const TIPO_PROBLEM_JSON = 'application/problem+json';
 
@@ -67,6 +73,42 @@ export interface DependenciasDoApp {
    * testes que só exercitam outras rotas não precisam de chaves nem de banco.
    */
   readonly jwks?: JwksService;
+  /**
+   * Serviços de cada módulo, vindos do composition root. Ausentes, o app sobe servindo só
+   * o que não depende de banco (health, metrics, jwks) — não é conveniência, é requisito:
+   * dezenas de testes exercitam o handler de erro ou o 404 sem PostgreSQL por perto.
+   */
+  readonly modulos?: ModulosDaAplicacao;
+}
+
+/** Única rota de senha que exige token — as outras existem justamente para quem não tem. */
+const ROTA_DE_TROCA_DE_SENHA = '/auth/password/change';
+
+/**
+ * Registra as rotas de senha num escopo próprio, com o access token verificado apenas na
+ * troca autenticada.
+ *
+ * `forgot`, `reset` e `policy` são públicas por definição: quem esqueceu a senha não tem
+ * token para apresentar. Um hook valendo para o escopo inteiro fecharia as três, então o
+ * preHandler decide pela rota.
+ *
+ * ponytail: uma comparação de caminho. Vira lista quando existir a segunda rota de senha
+ * autenticada.
+ */
+async function registrarModuloDeSenha(
+  app: FastifyInstance,
+  deps: DependenciasDeSenha,
+  verificarAccessToken: VerificadorDeAccessToken,
+): Promise<void> {
+  await app.register((escopo, _opcoes, pronto) => {
+    escopo.addHook('preHandler', async (requisicao, resposta) => {
+      if (requisicao.routeOptions.url === ROTA_DE_TROCA_DE_SENHA) {
+        await verificarAccessToken(requisicao, resposta);
+      }
+    });
+    registrarRotasDeSenha(escopo, deps);
+    pronto();
+  });
 }
 
 /** Prontidão degenerada: usada quando o app sobe sem dependências injetadas. */
@@ -219,6 +261,13 @@ export async function construirApp(
 
   if (dependencias.jwks !== undefined) {
     registrarRotasDeJwks(app, { jwks: dependencias.jwks });
+  }
+
+  const modulos = dependencias.modulos;
+  if (modulos !== undefined) {
+    registrarRotasDeAuth(app, modulos.auth);
+    registrarRotasDeRefresh(app, modulos.refresh);
+    await registrarModuloDeSenha(app, modulos.password, modulos.auth.verificarAccessToken);
   }
 
   await app.ready();
