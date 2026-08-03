@@ -402,3 +402,53 @@ describe('carregarEnv — coerência entre cache e janela de graça', () => {
     expect(() => carregarEnv(fonteValida())).not.toThrow();
   });
 });
+
+describe('carregarEnv — origens de CORS', () => {
+  it('sem a variável, nenhuma origem é liberada', () => {
+    const env = carregarEnv(fonteValida());
+
+    expect(env.CORS_ALLOWED_ORIGINS).toEqual([]);
+  });
+
+  it('valor vazio também não libera nada', () => {
+    const env = carregarEnv(fonteValida({ CORS_ALLOWED_ORIGINS: '' }));
+
+    expect(env.CORS_ALLOWED_ORIGINS).toEqual([]);
+  });
+
+  it('divide a lista por vírgula e descarta o espaço em volta', () => {
+    const env = carregarEnv(
+      fonteValida({
+        CORS_ALLOWED_ORIGINS: 'https://app.exemplo.com, http://localhost:5173',
+      }),
+    );
+
+    expect(env.CORS_ALLOWED_ORIGINS).toEqual(['https://app.exemplo.com', 'http://localhost:5173']);
+  });
+
+  it('ignora entradas vazias deixadas por vírgula sobrando', () => {
+    const env = carregarEnv(fonteValida({ CORS_ALLOWED_ORIGINS: 'https://a.exemplo.com,,' }));
+
+    expect(env.CORS_ALLOWED_ORIGINS).toEqual(['https://a.exemplo.com']);
+  });
+
+  // Entrada com caminho nunca casa com a origem que o navegador manda: o CORS ficaria
+  // fechado enquanto a configuração afirma o contrário.
+  it('rejeita entrada com caminho', () => {
+    const erro = capturarErro(fonteValida({ CORS_ALLOWED_ORIGINS: 'https://app.exemplo.com/app' }));
+
+    expect(erro.variaveis.map((v) => v.nome)).toContain('CORS_ALLOWED_ORIGINS');
+  });
+
+  it('rejeita entrada com barra final', () => {
+    const erro = capturarErro(fonteValida({ CORS_ALLOWED_ORIGINS: 'https://app.exemplo.com/' }));
+
+    expect(erro.variaveis.map((v) => v.nome)).toContain('CORS_ALLOWED_ORIGINS');
+  });
+
+  it('rejeita valor que não é URL', () => {
+    const erro = capturarErro(fonteValida({ CORS_ALLOWED_ORIGINS: 'app.exemplo.com' }));
+
+    expect(erro.variaveis.map((v) => v.nome)).toContain('CORS_ALLOWED_ORIGINS');
+  });
+});
