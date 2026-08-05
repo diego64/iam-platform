@@ -18,6 +18,10 @@ import type { RevogadorDeSessoes } from '../interfaces/sessoes.port.js';
 import type { CanalDeNotificacao } from '../interfaces/notificacao.port.js';
 import { avaliarPolitica, mensagemDeRejeicao } from '../validators/politica.js';
 import { ErroDeSenha } from '../errors/password-error.js';
+import {
+  registradorNulo,
+  type RegistradorDeAuditoria,
+} from '../../audit/interfaces/audit-recorder.js';
 
 export interface DependenciasDeSenha {
   readonly servicoDeSenha: ServicoDeSenha;
@@ -30,6 +34,8 @@ export interface DependenciasDeSenha {
   readonly ttlResetMin: number;
   /** Quantas senhas anteriores bloquear, para impedir que o usuário volte a uma recente. */
   readonly historicoN: number;
+  /** Trilha de auditoria. Ausente, o serviço roda sem registrar — o padrão nos testes. */
+  readonly auditoria?: RegistradorDeAuditoria;
 }
 
 export interface PasswordService {
@@ -40,6 +46,7 @@ export interface PasswordService {
 
 export function criarPasswordService(deps: DependenciasDeSenha): PasswordService {
   const { servicoDeSenha, usuarios, tokensDeReset, historico, sessoes, notificacao } = deps;
+  const auditoria = deps.auditoria ?? registradorNulo();
 
   /** Valida política com contexto do e-mail; lança `politica` no primeiro motivo. */
   function exigirPolitica(senha: string, email: string): void {
@@ -91,6 +98,12 @@ export function criarPasswordService(deps: DependenciasDeSenha): PasswordService
       exigirPolitica(senhaNova, usuario.email);
       await exigirNaoReuso(userId, senhaNova, usuario.passwordHash);
       await aplicarNovaSenha(usuario, senhaNova);
+      await auditoria.registrar({
+        type: 'iam.password.changed',
+        actor: { id: userId, type: 'user' },
+        outcome: 'success',
+        reason: 'self_service',
+      });
     },
 
     async solicitarReset({ email, ipOrigem }): Promise<void> {
@@ -115,6 +128,12 @@ export function criarPasswordService(deps: DependenciasDeSenha): PasswordService
         ...(ipOrigem === undefined ? {} : { ipOrigem }),
       });
       await notificacao.enviarReset(email, token);
+      await auditoria.registrar({
+        type: 'iam.password.reset_requested',
+        actor: { id: usuario.id, type: 'user' },
+        outcome: 'success',
+        reason: 'self_service',
+      });
     },
 
     async confirmarReset({ token, senhaNova }): Promise<void> {
@@ -134,6 +153,12 @@ export function criarPasswordService(deps: DependenciasDeSenha): PasswordService
       if (consumido === null) throw new ErroDeSenha('token-invalido');
 
       await aplicarNovaSenha(usuario, senhaNova);
+      await auditoria.registrar({
+        type: 'iam.password.reset_completed',
+        actor: { id: usuario.id, type: 'user' },
+        outcome: 'success',
+        reason: 'self_service',
+      });
     },
   };
 }

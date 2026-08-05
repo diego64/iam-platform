@@ -80,7 +80,10 @@ export function criarAuditService(deps: DependenciasDoAuditService): Registrador
       type: evento.type,
       occurredAt: new Date(),
       actor: {
-        id: evento.actor.id,
+        // Quem emite descreve o que sabe. Serviço administrativo conhece o alvo, não quem
+        // pediu; o ator vem do contexto da requisição. Onde o emissor afirma `null` e não
+        // há autenticação — login que falhou —, `null` é o que fica.
+        id: evento.actor.id ?? contexto?.atorId ?? null,
         type: evento.actor.type,
         ...(ip === undefined ? {} : { ip }),
         ...(userAgent === undefined ? {} : { userAgent }),

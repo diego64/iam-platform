@@ -17,6 +17,12 @@ export interface ContextoDeRequisicao {
   readonly ip?: string;
   readonly userAgent?: string;
   readonly requestId?: string;
+  /**
+   * Quem está autenticado nesta requisição. Único campo mutável: a origem é conhecida ao
+   * abrir a requisição, mas o ator só existe depois que o token é verificado. Guardar o id
+   * aqui evita atravessar "quem pediu" pela assinatura de todo serviço administrativo.
+   */
+  atorId?: string;
 }
 
 const armazem = new AsyncLocalStorage<ContextoDeRequisicao>();
@@ -24,6 +30,15 @@ const armazem = new AsyncLocalStorage<ContextoDeRequisicao>();
 /** Executa `acao` com o contexto visível para tudo que ela chamar, direta ou indiretamente. */
 export function comContextoDeRequisicao<T>(contexto: ContextoDeRequisicao, acao: () => T): T {
   return armazem.run(contexto, acao);
+}
+
+/**
+ * Anota quem se autenticou. Chamado pelo verificador de token; fora de requisição não faz
+ * nada, porque não há contexto onde anotar.
+ */
+export function definirAtorDaRequisicao(id: string): void {
+  const contexto = armazem.getStore();
+  if (contexto !== undefined) contexto.atorId = id;
 }
 
 /** O contexto da requisição em curso, ou `undefined` fora de uma. */
