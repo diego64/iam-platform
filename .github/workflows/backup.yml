@@ -13,11 +13,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      # O artefato carrega hash de senha de todos os usuários e a chave privada de
+      # assinatura. Sem o destinatário, o script recusa gravar — e é assim que ele deve
+      # falhar: alto, antes de produzir um dump legível por quem tiver acesso ao artefato.
+      - name: Instalar age
+        run: sudo apt-get update && sudo apt-get install -y age
       - name: Backup PostgreSQL
-        env: { POSTGRES_URL: '${{ secrets.PROD_POSTGRES_URL }}' }
+        env:
+          POSTGRES_URL: '${{ secrets.PROD_POSTGRES_URL }}'
+          BACKUP_AGE_RECIPIENT: '${{ secrets.BACKUP_AGE_RECIPIENT }}'
         run: bash scripts/backup.sh --postgres
       - name: Backup MongoDB
-        env: { MONGODB_URL: '${{ secrets.PROD_MONGODB_URL }}' }
+        env:
+          MONGODB_URL: '${{ secrets.PROD_MONGODB_URL }}'
+          BACKUP_AGE_RECIPIENT: '${{ secrets.BACKUP_AGE_RECIPIENT }}'
         run: bash scripts/backup.sh --mongodb
       - name: Validar Backup
         run: bash scripts/backup.sh --validate

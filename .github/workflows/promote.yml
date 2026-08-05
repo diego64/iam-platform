@@ -81,7 +81,10 @@ jobs:
         env:
           POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
           MONGODB_URL: ${{ secrets.MONGODB_URL }}
-        run: bash scripts/backup.sh --all
+          BACKUP_AGE_RECIPIENT: ${{ secrets.BACKUP_AGE_RECIPIENT }}
+        run: |
+          sudo apt-get update && sudo apt-get install -y age
+          bash scripts/backup.sh --all
 
       - name: Apontar o serviço para o digest e aguardar o deploy
         id: deploy
