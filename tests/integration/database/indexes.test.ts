@@ -67,7 +67,7 @@ describe('garantirIndices — token_denylist', () => {
   });
 });
 
-describe('garantirIndices — password_reset_tokens (SPEC 009)', () => {
+describe('garantirIndices — password_reset_tokens', () => {
   it('cria índice único em token_sha256', async () => {
     const indices = await indicesDe('password_reset_tokens');
 
@@ -84,6 +84,38 @@ describe('garantirIndices — password_reset_tokens (SPEC 009)', () => {
     const indices = await indicesDe('password_reset_tokens');
 
     expect(indices.has('user_id_1')).toBe(true);
+  });
+});
+
+describe('garantirIndices — audit_log', () => {
+  it('cria índice único em seq (buraco na cadeia é detectável)', async () => {
+    const indices = await indicesDe('audit_log');
+
+    expect(indices.get('seq_1')?.['unique']).toBe(true);
+  });
+
+  it('cria índice único em event_id', async () => {
+    const indices = await indicesDe('audit_log');
+
+    expect(indices.get('event_id_1')?.['unique']).toBe(true);
+  });
+
+  it('cria os índices de consulta por tipo, ator e alvo, sempre com recorte por tempo', async () => {
+    const indices = await indicesDe('audit_log');
+
+    expect(indices.has('occurred_at_-1')).toBe(true);
+    expect(indices.has('type_1_occurred_at_-1')).toBe(true);
+    expect(indices.has('actor.id_1_occurred_at_-1')).toBe(true);
+    expect(indices.has('target.id_1_occurred_at_-1')).toBe(true);
+  });
+
+  it('não cria nenhum índice TTL: a trilha não expira sozinha', async () => {
+    const indices = await indicesDe('audit_log');
+
+    const comTtl = [...indices.values()].filter(
+      (indice) => indice['expireAfterSeconds'] !== undefined,
+    );
+    expect(comTtl).toEqual([]);
   });
 });
 
