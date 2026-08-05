@@ -1,19 +1,23 @@
 /**
  * Responsabilidade: guards de autorização (`preHandler` Fastify) que rodam depois do
  * `verificarAccessToken` — este autentica; o guard só decide se o já-autenticado pode.
- * Consumido por: as rotas do RBAC e, futuramente, do painel admin (018) e clientes (011).
+ * Consumido por: as rotas de papéis/permissões, de clientes, de chaves, da trilha de
+ * auditoria e do painel administrativo.
  * Regras:
  *  - **Fail closed**: sem `request.usuario`, ou com `permissions`/`roles` que não são array,
  *    a resposta é 403 — nunca 500, nunca passa.
  *  - `exigirPermissao(...requeridas)` exige TODAS as permissões (AND). Curinga: `*` (super)
  *    e `recurso:*` satisfazem qualquer verificação daquele recurso.
  *  - `exigirPapel(...papeis)` passa se o usuário tem QUALQUER um dos papéis (OR) — é como a
- *    restrição "só superadmin" (RF-09) é imposta: `exigirPapel('superadmin')`.
+ *    restrição "só o superadmin concede privilégio" é imposta: `exigirPapel('superadmin')`.
+ *  - Todo guard sai marcado como autorização, para a checagem de boot conseguir afirmar que
+ *    uma rota administrativa tem quem a autorize — e não só quem a autentique.
  *  - 403 no formato problem+json; a permissão exigida vira rótulo da métrica de negação.
  */
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { montarProblema } from '../../../shared/errors/problem-json.js';
 import { medidorDeRbacNulo, type MedidorDeRbac } from '../metrics/rbac.metrics.js';
+import { marcarAutorizacao } from '../../../shared/middleware/marcadores.js';
 
 const TIPO_PROBLEM_JSON = 'application/problem+json';
 
@@ -58,7 +62,7 @@ export function criarGuardsDeAutorizacao(deps: DependenciasDoGuard = {}): Guards
 
   return {
     exigirPermissao(...requeridas: string[]): GuardDeAutorizacao {
-      return async (requisicao, resposta): Promise<void> => {
+      return marcarAutorizacao(async (requisicao, resposta): Promise<void> => {
         const inicio = process.hrtime.bigint();
         const perms = requisicao.usuario?.permissions;
         if (!Array.isArray(perms)) {
@@ -70,16 +74,16 @@ export function criarGuardsDeAutorizacao(deps: DependenciasDoGuard = {}): Guards
         if (faltou !== undefined) {
           await negar(resposta, faltou);
         }
-      };
+      });
     },
 
     exigirPapel(...papeis: string[]): GuardDeAutorizacao {
-      return async (requisicao, resposta): Promise<void> => {
+      return marcarAutorizacao(async (requisicao, resposta): Promise<void> => {
         const roles = requisicao.usuario?.roles;
         if (!Array.isArray(roles) || !papeis.some((p) => roles.includes(p))) {
           await negar(resposta, papeis[0] ?? '');
         }
-      };
+      });
     },
   };
 }
