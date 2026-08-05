@@ -292,7 +292,20 @@ export const esquemaEnv = z.object({
   // trilha de milhões prende um processo e ainda entrega uma resposta que ninguém espera.
   AUDIT_INTEGRITY_MAX_WINDOW: z.coerce.number().int().min(100).max(1_000_000).default(50_000),
 
-  // Admin de bootstrap (SPEC 002). Opcionais: presentes, o server cria o primeiro admin
+  // Janela do cache dos números da visão administrativa. Um painel aberto com atualização
+  // automática consultaria os dois bancos a cada poucos segundos, por aba; a janela troca
+  // isso por uma apuração por processo. São contadores de diagnóstico, e a resposta declara
+  // o instante em que foram apurados — o painel mostra a idade do dado em vez de fingir
+  // tempo real. Zero desliga o cache, útil em teste.
+  ADMIN_OVERVIEW_CACHE_MS: z.coerce.number().int().min(0).max(300_000).default(30_000),
+
+  // Quantos eventos de auditoria a ficha de um usuário carrega. Baixo de propósito: a ficha
+  // existe para dar contexto, não para ser cliente de auditoria — quem investiga usa a
+  // listagem da trilha, com filtro e paginação. Teto de 50 impede que uma ficha vire, por
+  // descuido, a consulta mais cara do painel.
+  ADMIN_USER_AUDIT_LIMIT: z.coerce.number().int().min(1).max(50).default(10),
+
+  // Admin de bootstrap. Opcionais: presentes, o server cria o primeiro admin
   // na subida (idempotente); ausentes, nada acontece. A senha nunca é logada — só o nome
   // e o motivo, como toda variável sensível deste schema.
   IAM_BOOTSTRAP_ADMIN_EMAIL: z.string().email().max(254).optional(),
