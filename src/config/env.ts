@@ -265,6 +265,33 @@ export const esquemaEnv = z.object({
     )
     .refine((origens) => origens.every(ehOrigemValida)),
 
+  // Segredo que entra no hash do e-mail quando a operação não tem ator identificado (login
+  // de conta inexistente). Sem ele, o hash é reversível por dicionário de e-mails, que é
+  // exatamente o que a pista existe para evitar. Opcional no schema pelo mesmo motivo da
+  // MASTER_KEY — ambiente de desenvolvimento sobe sem segredo —, e exigido em produção na
+  // montagem do serviço, que aborta o boot se faltar.
+  //
+  // Rotacionar este valor quebra a correlação com todos os eventos anteriores, sem ganho de
+  // segurança correspondente: ele protege a trilha vazada, não o processo em execução. Fica
+  // de fora da rotação periódica de segredos.
+  AUDIT_HINT_PEPPER: z.string().min(32).optional(),
+
+  // De quantos em quantos eventos a posição do topo da trilha é ancorada no PostgreSQL.
+  // É o tamanho da janela que um truncamento consegue apagar sem ser detectado: 100 eventos
+  // custa uma escrita barata a cada 100 e mantém a janela pequena. Zero não é aceito —
+  // seria ancorar a cada evento, transformando toda escrita de auditoria em duas.
+  AUDIT_CHECKPOINT_EVERY: z.coerce.number().int().min(1).max(100_000).default(100),
+
+  // Voltas na disputa pelo topo da cadeia antes de desistir de escrever o evento. Cinco
+  // cobre a contenção normal de poucas réplicas; acima disso o problema não é a volta, é a
+  // taxa de escrita, e insistir só empurra a fila para frente.
+  AUDIT_CAS_MAX_RETRIES: z.coerce.number().int().min(1).max(100).default(5),
+
+  // Teto de eventos que uma verificação de integridade percorre por requisição. Verificar a
+  // trilha inteira é trabalho de runbook, não de chamada HTTP: sem teto, um `de=1` numa
+  // trilha de milhões prende um processo e ainda entrega uma resposta que ninguém espera.
+  AUDIT_INTEGRITY_MAX_WINDOW: z.coerce.number().int().min(100).max(1_000_000).default(50_000),
+
   // Admin de bootstrap (SPEC 002). Opcionais: presentes, o server cria o primeiro admin
   // na subida (idempotente); ausentes, nada acontece. A senha nunca é logada — só o nome
   // e o motivo, como toda variável sensível deste schema.
