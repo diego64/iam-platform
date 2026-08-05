@@ -20,6 +20,10 @@ import type { TokenService } from '../../auth/services/token.service.js';
 import type { PortaDeRefreshToken } from '../../auth/interfaces/refresh-token.port.js';
 import type { ParDeTokens } from '../../auth/types/auth.types.js';
 import { uuidv7 } from '../../../shared/crypto/uuidv7.js';
+import {
+  registradorNulo,
+  type RegistradorDeAuditoria,
+} from '../../audit/interfaces/audit-recorder.js';
 
 export interface DependenciasDoRefreshTokenService {
   readonly repo: RepositorioDeRefreshToken;
@@ -38,6 +42,8 @@ export interface DependenciasDoRefreshTokenService {
   /** Scope padrão dos tokens reemitidos (igual ao do login por senha). */
   readonly scopePadrao?: string;
   readonly medidor?: MedidorDeRefresh;
+  /** Trilha de auditoria. Ausente, o serviço roda sem registrar — o padrão nos testes. */
+  readonly auditoria?: RegistradorDeAuditoria;
 }
 
 export interface RefreshTokenService extends PortaDeRefreshToken {
@@ -49,6 +55,7 @@ export function criarRefreshTokenService(
   deps: DependenciasDoRefreshTokenService,
 ): RefreshTokenService {
   const medidor = deps.medidor ?? medidorDeRefreshNulo();
+  const auditoria = deps.auditoria ?? registradorNulo();
   const scope = deps.scopePadrao ?? '';
 
   /** Persiste um token novo numa família, com validade deslizante e teto absoluto dados. */
@@ -112,6 +119,15 @@ export function criarRefreshTokenService(
         }
         await deps.repo.revogarFamilia(doc.familyId);
         medidor.contarReuso();
+        // Token consumido reapresentado fora da janela de corrida: ou vazou, ou foi
+        // roubado. A família inteira já caiu; o evento é o que permite investigar depois.
+        await auditoria.registrar({
+          type: 'iam.token.reuse_detected',
+          actor: { id: doc.userId, type: 'user' },
+          target: { id: doc.familyId, type: 'session' },
+          outcome: 'failure',
+          reason: 'token_reused',
+        });
         throw new ErroDeRefreshInvalido('reuso');
       }
 
@@ -157,6 +173,12 @@ export function criarRefreshTokenService(
 
       medidor.contarRotacao();
       medidor.observarDuracao((Date.now() - inicio) / 1000);
+      await auditoria.registrar({
+        type: 'iam.token.refreshed',
+        actor: { id: doc.userId, type: 'user' },
+        target: { id: doc.familyId, type: 'session' },
+        outcome: 'success',
+      });
       return {
         accessToken: emitido.token,
         refreshToken: novoRefresh,

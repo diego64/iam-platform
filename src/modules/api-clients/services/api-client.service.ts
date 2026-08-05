@@ -13,6 +13,10 @@
 import type { Logger } from '../../../shared/logger/index.js';
 import type { ServicoDeSenha } from '../../../shared/crypto/password.service.js';
 import { ErroDeCliente } from '../errors/api-client.errors.js';
+import {
+  registradorNulo,
+  type RegistradorDeAuditoria,
+} from '../../audit/interfaces/audit-recorder.js';
 import { gerarClientId, gerarSegredo } from './credential-factory.js';
 import type { ResolvedorDeEscopos } from './scope-resolver.js';
 import type {
@@ -34,6 +38,8 @@ export interface ConfiguracaoDeClientes {
   /** Janela padrão da sobreposição de segredo, usada quando a requisição não informa uma. */
   readonly sobreposicaoPadraoMs: number;
   readonly medidor?: MedidorDeClientes;
+  /** Trilha de auditoria. Ausente, o serviço roda sem registrar — o padrão nos testes. */
+  readonly auditoria?: RegistradorDeAuditoria;
 }
 
 export interface EntradaDeCriacao {
@@ -89,6 +95,7 @@ function ehNomeDuplicado(erro: unknown): boolean {
 
 export function criarApiClientService(config: ConfiguracaoDeClientes): ApiClientService {
   const medidor = config.medidor ?? medidorDeClientesNulo();
+  const auditoria = config.auditoria ?? registradorNulo();
 
   async function exigirCliente(id: string): Promise<ClienteDeApi> {
     const cliente = await config.repo.buscarPorId(id);
@@ -133,6 +140,14 @@ export function criarApiClientService(config: ConfiguracaoDeClientes): ApiClient
         { ator_id: ator ?? null, client_id: cliente.clientId, delta: { escopos: cliente.escopos } },
         'clients.create: cliente criado',
       );
+      await auditoria.registrar({
+        type: 'iam.client.created',
+        actor: { id: ator ?? null, type: 'user' },
+        target: { id: cliente.id, type: 'client' },
+        outcome: 'success',
+        reason: 'admin_action',
+        metadata: { client_id: cliente.clientId, escopos: [...cliente.escopos] },
+      });
 
       return { cliente, segredo };
     },
@@ -229,6 +244,18 @@ export function criarApiClientService(config: ConfiguracaoDeClientes): ApiClient
         },
         'clients.rotate: segredo rotacionado',
       );
+      // O segredo em si nunca entra no evento — só o fato da troca e a janela em que a
+      // credencial anterior ainda vale.
+      await auditoria.registrar({
+        type: 'iam.client.secret_rotated',
+        actor: { id: ator ?? null, type: 'user' },
+        target: { id, type: 'client' },
+        outcome: 'success',
+        reason: 'admin_action',
+        metadata: {
+          anterior_expira_em: resultado.segredoAnteriorExpiraEm?.toISOString() ?? 'imediato',
+        },
+      });
 
       return {
         clientId: resultado.clientId,

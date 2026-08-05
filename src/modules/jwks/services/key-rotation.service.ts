@@ -18,6 +18,10 @@ import type { MetadadosDeChave } from '../types/jwks.types.js';
 import { ErroDeRotacao } from '../errors/rotation.errors.js';
 import { gerarParEd25519 } from './key-factory.js';
 import { medidorDeJwksNulo, type MedidorDeJwks } from '../metrics/jwks.metrics.js';
+import {
+  registradorNulo,
+  type RegistradorDeAuditoria,
+} from '../../audit/interfaces/audit-recorder.js';
 
 /** Por que a rotação aconteceu — vira rótulo de métrica, então é lista fechada. */
 export type MotivoDeRotacao = 'manual' | 'scheduled' | 'revocation';
@@ -35,6 +39,8 @@ export interface ConfiguracaoDeRotacao {
   /** Margem após o fim da verificabilidade antes de a linha ser apagada. */
   readonly purgaAposMs: number;
   readonly medidor?: MedidorDeJwks;
+  /** Trilha de auditoria. Ausente, o serviço roda sem registrar — o padrão nos testes. */
+  readonly auditoria?: RegistradorDeAuditoria;
   /** Relógio injetável para teste; default `Date.now`. */
   readonly agora?: () => number;
 }
@@ -79,6 +85,7 @@ export interface KeyRotationService {
 export function criarKeyRotationService(config: ConfiguracaoDeRotacao): KeyRotationService {
   const agora = config.agora ?? Date.now;
   const medidor = config.medidor ?? medidorDeJwksNulo();
+  const auditoria = config.auditoria ?? registradorNulo();
 
   /** Gera, cifra e insere uma chave pré-publicada. */
   async function inserirProxima(): Promise<MetadadosDeChave> {
@@ -166,6 +173,16 @@ export function criarKeyRotationService(config: ConfiguracaoDeRotacao): KeyRotat
       },
       'jwks.rotate: chave promovida',
     );
+    // O ator é nulo quando a rotação parte do agendador, e não de uma requisição: é
+    // exatamente a distinção que a investigação precisa fazer depois.
+    await auditoria.registrar({
+      type: 'iam.key.rotated',
+      actor: { id: ator ?? null, type: ator === undefined ? 'system' : 'user' },
+      target: { id: resultado.kidAtivo, type: 'key' },
+      outcome: 'success',
+      reason: motivo === 'revocation' ? 'admin_action' : 'rotation_scheduled',
+      metadata: { kid_anterior: resultado.kidAnterior ?? 'nenhum', motivo },
+    });
 
     return {
       kidAnterior: resultado.kidAnterior,
