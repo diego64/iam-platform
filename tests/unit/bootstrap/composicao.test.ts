@@ -205,7 +205,9 @@ describe('construirModulos — autorização das rotas de usuário', () => {
 
 describe('construirModulos — revogação de sessões', () => {
   it('a revogação chamada pelo bloqueio derruba os refresh tokens do usuário', async () => {
-    const updateMany = vi.fn(() => Promise.resolve());
+    // O repositório lê `modifiedCount` da resposta: quem revoga de fora precisa saber
+    // quantas sessões caíram, então o driver falso precisa devolver o resultado real.
+    const updateMany = vi.fn(() => Promise.resolve({ modifiedCount: 2 }));
     const banco = { collection: vi.fn(() => ({ updateMany })) } as unknown as Db;
     const { pool, jwks, repoJwks } = conexoesFalsas();
     const modulos = construirModulos({

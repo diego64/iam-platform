@@ -114,7 +114,10 @@ describe('rotação de refresh token', () => {
         buscarPorHash: () => Promise.resolve(doc),
         rotacionarAtomico: () => Promise.resolve(doc),
         revogarFamilia: () => Promise.resolve(),
-        revogarDoUsuario: () => Promise.resolve(),
+        revogarDoUsuario: () => Promise.resolve(0),
+        familiasAtivasDoUsuario: () => Promise.resolve([]),
+        contarFamiliasAtivas: () => Promise.resolve(0),
+        revogarFamiliaDoUsuario: () => Promise.resolve(true),
       },
       usuarios: {
         buscarPorId: () =>

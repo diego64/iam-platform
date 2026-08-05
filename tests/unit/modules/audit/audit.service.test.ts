@@ -52,6 +52,8 @@ function trilhaFalsa(perdasAntesDeVencer = 0): RepositorioDaTrilha & {
       });
     },
     buscarPorSeq: () => Promise.resolve(null),
+    contarPorTipoDesde: () => Promise.resolve(0),
+    ultimosDoUsuario: () => Promise.resolve([]),
     listar: () => Promise.resolve({ itens: [], proximoCursor: null, temMais: false }),
     lerFaixa: () => ({
       [Symbol.asyncIterator]: (): AsyncIterator<never> => ({

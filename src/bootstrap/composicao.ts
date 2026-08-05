@@ -78,6 +78,14 @@ import {
 } from '../modules/jwks/index.js';
 import type { DependenciasDasRotasDeChaves } from '../modules/jwks/routes/keys-admin.routes.js';
 import {
+  criarAdminSessionsService,
+  criarMedidorDeAdmin,
+  criarOverviewService,
+  criarUserViewService,
+  type DependenciasDasRotasDeAdmin,
+} from '../modules/admin/index.js';
+import { ultimaTrocaEm } from '../modules/password/repositories/password-history.repository.js';
+import {
   criarAuditIntegrityService,
   criarAuditQueryService,
   criarAuditService,
@@ -130,6 +138,7 @@ export interface ModulosDaAplicacao {
   readonly clientes: DependenciasDasRotasDeClientes;
   readonly chaves?: DependenciasDasRotasDeChaves;
   readonly auditoria: DependenciasDasRotasDeAuditoria;
+  readonly admin: DependenciasDasRotasDeAdmin;
 }
 
 /**
@@ -232,7 +241,11 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
    * é denylist por usuário — modelo da SPEC 006, não desta fiação.
    */
   const sessoes: RevogadorDeSessoes = {
-    revogarTodas: (userId) => repoRefresh.revogarDoUsuario(userId),
+    // A porta não se importa com quantas caíram; quem administra de fora se importa, e é
+    // por isso que o repositório passou a devolver a contagem.
+    revogarTodas: async (userId) => {
+      await repoRefresh.revogarDoUsuario(userId);
+    },
   };
 
   const authService = criarAuthService({
@@ -256,6 +269,99 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
     historicoN: 3,
     auditoria,
   });
+
+  /**
+   * Concretos das portas do painel administrativo.
+   *
+   * Cada um é uma tradução de duas linhas sobre um repositório que já existe: o painel
+   * agrega o que os outros módulos escrevem e não ganha acesso próprio a banco nenhum.
+   *
+   * Sessão é a família do refresh token — o token muda a cada rotação, a família não —, e é
+   * o que existe hoje de sessão persistida. Os metadados de origem (ip, agente, visto por
+   * último) entram quando o módulo de sessões trouxer a coleção que os guarda; até lá, a
+   * ficha os omite em vez de inventá-los.
+   */
+  const medidorDeAdmin = metricas ? criarMedidorDeAdmin() : undefined;
+  const repoClientesDoPainel = criarRepositorioDeClientes(pool);
+
+  const portasDoPainel = {
+    usuarios: {
+      contarPorStatus: async (): Promise<Record<'active' | 'blocked', number>> => {
+        const [active, blocked] = await Promise.all([
+          repoUsuarios.contar('active'),
+          repoUsuarios.contar('blocked'),
+        ]);
+        return { active, blocked };
+      },
+      buscarPorId: async (id: string) => {
+        const usuario = await repoUsuarios.buscarPorId(id);
+        return usuario === null
+          ? null
+          : {
+              id: usuario.id,
+              email: usuario.email,
+              status: usuario.status,
+              criadoEm: usuario.criadoEm,
+              atualizadoEm: usuario.atualizadoEm,
+            };
+      },
+    },
+    autorizacao: {
+      papeisDoUsuario: async (userId: string) => {
+        const papeis = await repoAssociacoes.papeisDoUsuario(userId);
+        // O resumo que a associação devolve não carrega `is_system`, e a ficha não precisa
+        // dele para nada além de rótulo: marcar tudo como não-sistema seria inventar. O
+        // campo fica `false` até a listagem de papéis do usuário trazer o metadado.
+        return papeis.map((papel) => ({ id: papel.id, name: papel.name, isSystem: false }));
+      },
+      permissoesEfetivas: (userId: string) => repoAuth.permissoesEfetivas(userId),
+    },
+    sessoes: {
+      listarDoUsuario: async (userId: string) => {
+        const familias = await repoRefresh.familiasAtivasDoUsuario(userId);
+        return familias.map((familia) => ({
+          sessionId: familia.familyId,
+          criadaEm: familia.criadaEm,
+          expiraEm: familia.expiraEm,
+        }));
+      },
+      contarAtivas: () => repoRefresh.contarFamiliasAtivas(),
+    },
+    revogador: {
+      revogarUma: (userId: string, sessionId: string) =>
+        repoRefresh.revogarFamiliaDoUsuario(userId, sessionId),
+      revogarTodas: (userId: string) => repoRefresh.revogarDoUsuario(userId),
+    },
+    auditoriaDeLeitura: {
+      contarPorTipoDesde: (tipo: string, desde: Date) => trilha.contarPorTipoDesde(tipo, desde),
+      ultimosDoUsuario: async (userId: string, limite: number) => {
+        const eventos = await trilha.ultimosDoUsuario(userId, limite);
+        return eventos.map((evento) => ({
+          seq: evento.seq,
+          type: evento.type,
+          occurredAt: evento.occurredAt,
+          outcome: evento.outcome,
+        }));
+      },
+    },
+    clientes: {
+      contarAtivos: async (): Promise<number> => {
+        const { total } = await repoClientesDoPainel.listar({
+          status: 'active',
+          limit: 1,
+          offset: 0,
+        });
+        return total;
+      },
+    },
+    chaves: {
+      obter: async () => {
+        const ativa = await repoJwks.obterAtiva();
+        return ativa === null ? null : { kid: ativa.kid, criadaEm: ativa.criadaEm };
+      },
+    },
+    senha: { alteradaEm: (userId: string) => ultimaTrocaEm(pool, userId) },
+  };
 
   const repoPoliticas = criarRepositorioDePolitica(pool);
   const motor = criarMotorDePoliticas({
@@ -336,6 +442,36 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
       }),
       guards,
       verificarAccessToken,
+    },
+    admin: {
+      overview: criarOverviewService({
+        usuarios: portasDoPainel.usuarios,
+        sessoes: portasDoPainel.sessoes,
+        auditoria: portasDoPainel.auditoriaDeLeitura,
+        clientes: portasDoPainel.clientes,
+        chaves: portasDoPainel.chaves,
+        janelaDeCacheMs: env.ADMIN_OVERVIEW_CACHE_MS,
+        ...(medidorDeAdmin === undefined ? {} : { medidor: medidorDeAdmin }),
+      }),
+      ficha: criarUserViewService({
+        usuarios: portasDoPainel.usuarios,
+        autorizacao: portasDoPainel.autorizacao,
+        sessoes: portasDoPainel.sessoes,
+        auditoria: portasDoPainel.auditoriaDeLeitura,
+        senha: portasDoPainel.senha,
+        limiteDeEventos: env.ADMIN_USER_AUDIT_LIMIT,
+        ...(medidorDeAdmin === undefined ? {} : { medidor: medidorDeAdmin }),
+      }),
+      sessoes: criarAdminSessionsService({
+        usuarios: portasDoPainel.usuarios,
+        sessoes: portasDoPainel.sessoes,
+        revogador: portasDoPainel.revogador,
+        auditoria,
+        ...(medidorDeAdmin === undefined ? {} : { medidor: medidorDeAdmin }),
+      }),
+      guards,
+      verificarAccessToken,
+      ...(medidorDeAdmin === undefined ? {} : { medidor: medidorDeAdmin }),
     },
     ...(rotacao === undefined
       ? {}

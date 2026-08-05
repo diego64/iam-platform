@@ -7,6 +7,15 @@
 import type { Pool } from 'pg';
 import type { RepositorioDeHistoricoDeSenha } from '../interfaces/historico.port.js';
 
+/** Instante da última troca de senha registrada, ou `null` para quem nunca trocou. */
+export async function ultimaTrocaEm(pool: Pool, userId: string): Promise<Date | null> {
+  const { rows } = await pool.query<{ created_at: Date }>(
+    'SELECT created_at FROM password_history WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1',
+    [userId],
+  );
+  return rows[0]?.created_at ?? null;
+}
+
 export function criarRepositorioDeHistorico(pool: Pool): RepositorioDeHistoricoDeSenha {
   return {
     async ultimosHashes(userId: string, n: number): Promise<string[]> {

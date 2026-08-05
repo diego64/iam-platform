@@ -58,6 +58,8 @@ function repoFake(eventos: EventoPersistido[]): RepositorioDaTrilha {
     },
     anexar: () => Promise.reject(new Error('não usado na verificação')),
     buscarPorSeq: (seq) => Promise.resolve(ordenados.find((e) => e.seq === seq) ?? null),
+    contarPorTipoDesde: () => Promise.resolve(0),
+    ultimosDoUsuario: () => Promise.resolve([]),
     listar: () => Promise.resolve({ itens: [], proximoCursor: null, temMais: false }),
     lerFaixa: (de, ate) => ({
       [Symbol.asyncIterator]: (): AsyncIterator<EventoPersistido> => {
