@@ -1,0 +1,87 @@
+name: Ensaio de restauração
+
+# Backup que nunca foi restaurado não é backup — é a esperança de um. O ensaio restaura a
+# cópia mais recente de homologação num par de bancos efêmeros e prova que dela sai um IdP
+# funcionando: migrações no ponto, índices e TTL presentes, chave decifrando e assinando,
+# trilha íntegra e a senha do canário conferindo.
+on:
+  schedule:
+    - cron: '0 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ensaio:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: drill
+          POSTGRES_PASSWORD: drill
+          POSTGRES_DB: iam-drill
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U drill" --health-interval 5s
+          --health-timeout 3s --health-retries 10
+      mongodb:
+        image: mongo:8
+        ports: ['27017:27017']
+        options: >-
+          --health-cmd "mongosh --quiet --eval \"db.adminCommand('ping').ok\""
+          --health-interval 5s --health-timeout 3s --health-retries 10
+
+    env:
+      POSTGRES_URL: postgres://drill:drill@127.0.0.1:5432/iam-drill
+      MONGODB_URL: mongodb://127.0.0.1:27017
+      MONGODB_DB: iam_drill
+      RESTORE_TARGET_POSTGRES_DB: iam-drill
+      RESTORE_TARGET_MONGODB_DB: iam_drill
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with: { node-version: '22', cache: 'pnpm' }
+      - run: pnpm install --frozen-lockfile
+
+      - name: Instalar clientes de banco e age
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client age
+          curl -fsSL https://fastdl.mongodb.org/tools/db/mongodb-database-tools-ubuntu2204-x86_64-100.9.4.deb -o /tmp/mongotools.deb
+          sudo dpkg -i /tmp/mongotools.deb
+
+      - name: Baixar a cópia mais recente de homologação
+        env:
+          BACKUP_DOWNLOAD_CMD: ${{ secrets.BACKUP_DOWNLOAD_CMD }}
+        run: ${BACKUP_DOWNLOAD_CMD:-echo 'sem comando de download configurado'} backups/
+
+      - name: Restaurar
+        env:
+          BACKUP_AGE_IDENTITY_FILE: ${{ runner.temp }}/identidade.age
+          IDENTIDADE: ${{ secrets.BACKUP_AGE_IDENTITY }}
+        run: |
+          printf '%s' "$IDENTIDADE" > "$BACKUP_AGE_IDENTITY_FILE"
+          bash scripts/restore.sh --dir backups --confirm
+
+      - name: Alinhar o esquema ao código atual
+        run: pnpm migrate
+
+      - name: Verificar o ambiente restaurado
+        env:
+          MASTER_KEY: ${{ secrets.HOMOLOG_MASTER_KEY }}
+          CANARY_EMAIL: ${{ secrets.CANARY_EMAIL }}
+          CANARY_PASSWORD: ${{ secrets.CANARY_PASSWORD }}
+        # Reprovação sai com 6 e derruba o job: um ensaio que passa apesar da divergência não
+        # ensaia nada.
+        run: pnpm backup:verify
+
+      - name: Marcar o conjunto como validado
+        # É o que protege este conjunto do expurgo: ele passa a ser o único que alguém
+        # comprovou que restaura.
+        run: |
+          carimbo=$(ls backups/pg-* | head -1 | sed -E 's/.*pg-([0-9TZ]+)\..*/\1/')
+          touch "backups/.drill-ok-${carimbo}"
