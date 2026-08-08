@@ -13,9 +13,15 @@ import {
 import type { VerificadorDeAccessToken } from '../middleware/verify-access-token.js';
 import { loginBody, logoutBody, respostaLogin, respostaMe } from '../schemas/auth.schema.js';
 import { LIMITE_LOGIN } from '../hooks/login-rate-limit.js';
+import type { HooksDeLimite } from '../../../shared/rate-limit/hook-por-identidade.js';
 
 export interface DependenciasDasRotasDeAuth extends DependenciasDoControllerDeAuth {
   readonly verificarAccessToken: VerificadorDeAccessToken;
+  /**
+   * Limite por conta. Ausente, vale só o limite por IP — que é o comportamento de antes da
+   * SPEC 016 e deixa passar o ataque distribuído: mil IPs contra a mesma conta.
+   */
+  readonly limitePorConta?: HooksDeLimite;
 }
 
 export function registrarRotasDeAuth(app: FastifyInstance, deps: DependenciasDasRotasDeAuth): void {
@@ -33,6 +39,14 @@ export function registrarRotasDeAuth(app: FastifyInstance, deps: DependenciasDas
         response: { 200: respostaLogin },
       },
       config: { rateLimit: LIMITE_LOGIN },
+      // O limite por IP roda no plugin, antes do corpo; o por conta precisa do e-mail e por
+      // isso vive aqui, depois da validação.
+      ...(deps.limitePorConta === undefined
+        ? {}
+        : {
+            preHandler: deps.limitePorConta.preHandler,
+            onResponse: deps.limitePorConta.onResponse,
+          }),
     },
     (requisicao, resposta) => controller.login(requisicao, resposta),
   );

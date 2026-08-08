@@ -15,6 +15,13 @@ import type { Pool } from 'pg';
 import type { Env } from '../config/env.js';
 import type { Logger } from '../shared/logger/index.js';
 import { criarServicoDeSenhaDaEnv } from '../shared/crypto/password.service.js';
+import { criarContadorEmMemoria } from '../shared/rate-limit/memory-store.js';
+import { criarContadorNoMongo } from '../shared/rate-limit/mongo-store.js';
+import { criarPoliticaDeRateLimit } from '../shared/rate-limit/politica.js';
+import { criarHookDeLimitePorIdentidade } from '../shared/rate-limit/hook-por-identidade.js';
+import { criarMedidorDeRateLimit } from '../shared/rate-limit/rate-limit.metrics.js';
+import { problemaDeRateLimit } from '../shared/rate-limit/resposta-429.js';
+import type { ContadorDeRateLimit } from '../shared/rate-limit/types.js';
 import {
   criarAuthService,
   criarMedidorDeAuth,
@@ -137,7 +144,15 @@ export interface DependenciasDaComposicao {
  * chave nova: sem o segredo não existe serviço de rotação, e as rotas administrativas de
  * chave não sobem.
  */
+/** O que o app precisa para compartilhar o contador de rate limit entre as réplicas. */
+export interface RateLimitDaAplicacao {
+  readonly contador: ContadorDeRateLimit;
+  readonly pepper: string;
+}
+
 export interface ModulosDaAplicacao {
+  /** Contador compartilhado, entregue ao plugin de rate limit pelo `app.ts`. */
+  readonly rateLimit: RateLimitDaAplicacao;
   readonly auth: DependenciasDasRotasDeAuth;
   readonly refresh: DependenciasDasRotasDeRefresh;
   readonly oauth: DependenciasDasRotasDeOAuth;
@@ -280,6 +295,51 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
           ...(medidorDeMfa ? { medidor: medidorDeMfa } : {}),
         });
 
+  // Rate limit: um contador para a plataforma inteira, e a política que o consulta. Com o
+  // contador local do plugin, o teto seria multiplicado pelo número de réplicas.
+  const pepperDeLimite = exigirPepper(env);
+  const medidorDeLimite = metricas ? criarMedidorDeRateLimit() : undefined;
+  const contadorDeLimite =
+    env.RATE_LIMIT_STORE === 'memory'
+      ? criarContadorEmMemoria()
+      : criarContadorNoMongo({
+          banco,
+          timeoutMs: env.RATE_LIMIT_STORE_TIMEOUT_MS,
+          aoFalhar: () => {
+            medidorDeLimite?.contarErroDoContador();
+          },
+        });
+  const politicaDeLimite = criarPoliticaDeRateLimit({
+    contador: contadorDeLimite,
+    pepper: pepperDeLimite,
+    ...(medidorDeLimite ? { medidor: medidorDeLimite } : {}),
+    aoFalhar: ({ rota, dimensao }) => {
+      logger.warn(
+        { evento: 'rate_limit.contador_indisponivel', rota, dimensao },
+        'contador de rate limit indisponível: a requisição seguiu sem o limite',
+      );
+    },
+  });
+
+  /** Barra com o 429 padrão da plataforma — problem+json com `Retry-After`. */
+  const limitePorConta = criarHookDeLimitePorIdentidade({
+    politica: politicaDeLimite,
+    dimensao: 'conta',
+    teto: env.RATE_LIMIT_LOGIN_ACCOUNT_MAX,
+    janelaMs: env.RATE_LIMIT_LOGIN_WINDOW_MS,
+    identificar: (requisicao) => {
+      const corpo = requisicao.body as { email?: unknown } | undefined;
+      return typeof corpo?.email === 'string' ? corpo.email : null;
+    },
+    responder: async (resposta, retryAfterSegundos) => {
+      await resposta
+        .status(429)
+        .header('retry-after', String(retryAfterSegundos))
+        .type('application/problem+json')
+        .send(problemaDeRateLimit());
+    },
+  });
+
   const authService = criarAuthService({
     repo: repoAuth,
     servicoDeSenha,
@@ -366,7 +426,8 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
         });
 
   return {
-    auth: { authService, verificarAccessToken },
+    rateLimit: { contador: contadorDeLimite, pepper: pepperDeLimite },
+    auth: { authService, verificarAccessToken, limitePorConta },
     refresh: { refreshTokenService },
     oauth: { oauthService },
     ...(env.MASTER_KEY === undefined

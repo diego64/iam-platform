@@ -39,14 +39,17 @@ function ehFalhaDoCliente(status: number): boolean {
   return status >= 400 && status < 500;
 }
 
+/** O par de hooks que uma rota instala para ganhar a dimensão de identidade. */
+export interface HooksDeLimite {
+  readonly preHandler: preHandlerAsyncHookHandler;
+  readonly onResponse: onResponseAsyncHookHandler;
+}
+
 /**
  * Devolve o par de hooks: o `preHandler` que barra quem já estourou e o `onResponse` que
  * debita a tentativa falha.
  */
-export function criarHookDeLimitePorIdentidade(config: ConfiguracaoDoHook): {
-  preHandler: preHandlerAsyncHookHandler;
-  onResponse: onResponseAsyncHookHandler;
-} {
+export function criarHookDeLimitePorIdentidade(config: ConfiguracaoDoHook): HooksDeLimite {
   const chaveDaRequisicao = Symbol.for('iam.rate-limit.identidade');
 
   function consultaDe(
