@@ -99,6 +99,7 @@ export function criarRefreshTokenService(
       absoluteExpiresAt,
       clientId: vinculo.clientId ?? null,
       escopo: vinculo.escopo ?? null,
+      amr: vinculo.amr ?? ['pwd'],
     });
     return token;
   }
@@ -211,6 +212,10 @@ export function criarRefreshTokenService(
           permissions: [...concedida.permissoes],
           scope: concedida.escopo,
           ...(doc.clientId === null ? {} : { clientId: doc.clientId }),
+          // A renovação preserva a força da autenticação original: renovar não promove nem
+          // rebaixa um token que nasceu com segundo fator.
+          amr: doc.amr,
+          ...(doc.amr.includes('otp') || doc.amr.includes('recovery') ? { mfa: true } : {}),
         },
         opcoes?.ttlSegundos === undefined ? undefined : { ttlSegundos: opcoes.ttlSegundos },
       );
@@ -219,6 +224,7 @@ export function criarRefreshTokenService(
       const novoRefresh = await persistirNovo(doc.userId, doc.familyId, doc.absoluteExpiresAt, {
         clientId: doc.clientId,
         escopo: opcoes?.restringirAutoridade === undefined ? doc.escopo : concedida.escopo,
+        amr: doc.amr,
       });
 
       medidor.contarRotacao();

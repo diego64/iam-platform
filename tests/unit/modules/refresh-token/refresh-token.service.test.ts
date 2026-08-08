@@ -43,9 +43,10 @@ function docAtivo(sobrescritas: Partial<RefreshPersistido> = {}): RefreshPersist
     rotatedAt: null,
     idleExpiresAt: new Date(agora + 60_000),
     absoluteExpiresAt: new Date(agora + 3_600_000),
-    // Documento do login por senha: sem dono e sem escopo gravado.
+    // Documento do login por senha: sem dono, sem escopo gravado e de um fator.
     clientId: null,
     escopo: null,
+    amr: ['pwd'],
     ...sobrescritas,
   };
 }
@@ -238,6 +239,31 @@ describe('vínculo com o cliente', () => {
     await expect(service.rotacionar('t', { clientIdEsperado: 'cli_a' })).rejects.toMatchObject({
       motivo: 'cliente_divergente',
     });
+  });
+
+  it('a renovação preserva a força da autenticação da família', async () => {
+    // Sem isso, a primeira renovação transformaria uma sessão de dois fatores numa que diz
+    // ter um só, e qualquer política de fator forte falharia 15 min depois do login.
+    const { service, buscarPorHash, rotacionarAtomico, emitir, registrar } = montar();
+    const doc = docAtivo({ amr: ['pwd', 'otp'] });
+    buscarPorHash.mockResolvedValueOnce(doc);
+    rotacionarAtomico.mockResolvedValueOnce(doc);
+
+    await service.rotacionar('t');
+
+    expect(emitir).toHaveBeenCalledWith(
+      expect.objectContaining({ amr: ['pwd', 'otp'], mfa: true }),
+      undefined,
+    );
+    expect(registrar.mock.calls[0]?.[0]).toMatchObject({ amr: ['pwd', 'otp'] });
+  });
+
+  it('família de um fator não ganha a claim mfa', async () => {
+    const { service, emitir } = montar();
+
+    await service.rotacionar('t');
+
+    expect(emitir).toHaveBeenCalledWith(expect.not.objectContaining({ mfa: true }), undefined);
   });
 
   it('o sucessor herda o dono e o escopo da família', async () => {

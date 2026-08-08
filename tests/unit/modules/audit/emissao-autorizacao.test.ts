@@ -97,6 +97,7 @@ describe('rotação de refresh token', () => {
     absoluteExpiresAt: Date;
     clientId: string | null;
     escopo: string | null;
+    amr: readonly string[];
   } {
     return {
       tokenHash: 'hash',
@@ -108,6 +109,7 @@ describe('rotação de refresh token', () => {
       absoluteExpiresAt: new Date(AGORA + 600_000),
       clientId: null,
       escopo: null,
+      amr: ['pwd'],
     };
   }
 
