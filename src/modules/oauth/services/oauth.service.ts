@@ -20,6 +20,12 @@ import type { ClienteAutenticado, TipoDeGrant } from '../../api-clients/types/ap
 import type { TokenService } from '../../auth/services/token.service.js';
 import type { AuthService } from '../../auth/services/auth.service.js';
 import type { RefreshTokenService } from '../../refresh-token/services/refresh-token.service.js';
+import { ErroDeRefreshInvalido } from '../../refresh-token/errors/refresh-token-error.js';
+import { medidorDeOAuthNulo, type MedidorDeOAuth } from '../metrics/oauth.metrics.js';
+import {
+  registradorNulo,
+  type RegistradorDeAuditoria,
+} from '../../audit/interfaces/audit-recorder.js';
 
 const GRANTS_CONHECIDOS: readonly TipoDeGrant[] = [
   'client_credentials',
@@ -52,6 +58,9 @@ export interface DependenciasDoOAuthService {
   readonly tokenService: TokenService;
   readonly authService: Pick<AuthService, 'login'>;
   readonly refreshTokenService: Pick<RefreshTokenService, 'rotacionar'>;
+  readonly medidor?: MedidorDeOAuth;
+  /** Trilha de auditoria. Ausente, o serviço roda sem registrar — o padrão nos testes. */
+  readonly auditoria?: RegistradorDeAuditoria;
   /**
    * Interruptor global do `password` grant. Desligado, o grant deixa de existir para todos
    * os clientes — a saída de incidente que não depende de editar cliente por cliente.
@@ -68,6 +77,9 @@ function ehGrantConhecido(valor: string): valor is TipoDeGrant {
 }
 
 export function criarOAuthService(deps: DependenciasDoOAuthService): OAuthService {
+  const medidor = deps.medidor ?? medidorDeOAuthNulo();
+  const auditoria = deps.auditoria ?? registradorNulo();
+
   /** Autentica o cliente e confirma que ele pode usar o grant pedido. */
   async function autorizarCliente(pedido: PedidoDeToken): Promise<ClienteAutenticado> {
     const cliente = await deps.clientAuth.autenticar(
@@ -235,25 +247,62 @@ export function criarOAuthService(deps: DependenciasDoOAuthService): OAuthServic
       if (erro instanceof ErroDeOAuth) {
         throw erro;
       }
+      if (erro instanceof ErroDeRefreshInvalido && erro.motivo === 'cliente_divergente') {
+        // Token de uma família que não é deste cliente: ou vazou entre integrações, ou
+        // alguém está testando tokens alheios. Contador próprio, porque merece alerta.
+        medidor.contarDescasamentoDeCliente();
+      }
       // Ausente, expirado, reusado, de outro cliente: tudo é `invalid_grant`. O motivo real
       // fica na métrica e no log do módulo de refresh.
       throw new ErroDeOAuth('invalid_grant');
     }
   }
 
+  async function despachar(pedido: PedidoDeToken): Promise<TokenConcedido> {
+    const cliente = await autorizarCliente(pedido);
+
+    if (pedido.grantType === 'client_credentials') {
+      return porCredenciaisDoCliente(cliente, pedido.escoposSolicitados);
+    }
+
+    if (pedido.grantType === 'password') {
+      return porSenha(cliente, pedido);
+    }
+
+    return porRefresh(cliente, pedido);
+  }
+
   return {
     async emitir(pedido: PedidoDeToken): Promise<TokenConcedido> {
-      const cliente = await autorizarCliente(pedido);
+      const inicio = Date.now();
 
-      if (pedido.grantType === 'client_credentials') {
-        return porCredenciaisDoCliente(cliente, pedido.escoposSolicitados);
+      try {
+        const concedido = await despachar(pedido);
+
+        medidor.contarEmissao(pedido.grantType);
+        medidor.observarDuracao(pedido.grantType, (Date.now() - inicio) / 1000);
+        await auditoria.registrar({
+          type: 'iam.oauth.token_issued',
+          actor: { id: pedido.credencial.clientId, type: 'client' },
+          outcome: 'success',
+          metadata: { grant_type: pedido.grantType, scope: concedido.scope },
+        });
+        return concedido;
+      } catch (erro) {
+        const codigo = erro instanceof ErroDeOAuth ? erro.codigo : 'invalid_request';
+        medidor.contarRecusa(pedido.grantType, codigo);
+        medidor.observarDuracao(pedido.grantType, (Date.now() - inicio) / 1000);
+        // O identificador entra na trilha mesmo quando o cliente não existe: aqui ele é o
+        // que foi tentado, e contar tentativas contra identificadores inventados é
+        // justamente o sinal de varredura que a detecção de eventos procura.
+        await auditoria.registrar({
+          type: 'iam.oauth.token_denied',
+          actor: { id: pedido.credencial.clientId, type: 'client' },
+          outcome: 'failure',
+          metadata: { grant_type: pedido.grantType, erro: codigo },
+        });
+        throw erro;
       }
-
-      if (pedido.grantType === 'password') {
-        return porSenha(cliente, pedido);
-      }
-
-      return porRefresh(cliente, pedido);
     },
   };
 }

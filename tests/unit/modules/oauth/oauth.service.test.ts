@@ -18,6 +18,7 @@ import type { ParDeTokens } from '../../../../src/modules/auth/types/auth.types.
 import type { OpcoesDeRotacao } from '../../../../src/modules/refresh-token/services/refresh-token.service.js';
 import { ErroDeRefreshInvalido } from '../../../../src/modules/refresh-token/errors/refresh-token-error.js';
 import { ErroDeAutenticacao } from '../../../../src/modules/auth/errors/auth-error.js';
+import { rotuloDeGrant } from '../../../../src/modules/oauth/metrics/oauth.metrics.js';
 
 const CREDENCIAL = { clientId: 'cli_abc', secret: 's3gr3d0' };
 
@@ -38,6 +39,13 @@ interface Fakes {
   emitir: ReturnType<typeof vi.fn>;
   login: ReturnType<typeof vi.fn>;
   rotacionar: ReturnType<typeof vi.fn>;
+  medidor: {
+    contarEmissao: ReturnType<typeof vi.fn>;
+    contarRecusa: ReturnType<typeof vi.fn>;
+    contarDescasamentoDeCliente: ReturnType<typeof vi.fn>;
+    observarDuracao: ReturnType<typeof vi.fn>;
+  };
+  registrar: ReturnType<typeof vi.fn>;
 }
 
 function montar(
@@ -48,6 +56,13 @@ function montar(
     escopoOriginal?: string | null;
   } = {},
 ): Fakes {
+  const medidor = {
+    contarEmissao: vi.fn(),
+    contarRecusa: vi.fn(),
+    contarDescasamentoDeCliente: vi.fn(),
+    observarDuracao: vi.fn(),
+  };
+  const registrar = vi.fn(() => Promise.resolve());
   const autenticar = vi.fn(() => Promise.resolve(cliente));
   const emitir = vi.fn<() => Promise<TokenEmitido>>(() =>
     Promise.resolve({ token: 'jwt-cli', jti: 'j1', expiraEm: new Date(), ttlSegundos: 900 }),
@@ -86,11 +101,15 @@ function montar(
       authService: { login },
       refreshTokenService: { rotacionar },
       passwordGrantHabilitado: opcoes.passwordGrantHabilitado ?? true,
+      medidor,
+      auditoria: { registrar },
     }),
     autenticar,
     emitir,
     login,
     rotacionar,
+    medidor,
+    registrar,
   };
 }
 
@@ -310,5 +329,81 @@ describe('grant refresh_token', () => {
     await expect(
       service.emitir(pedidoDeRefresh({ refreshToken: undefined })),
     ).rejects.toMatchObject({ codigo: 'invalid_request' });
+  });
+});
+
+describe('métricas e trilha', () => {
+  it('emissão conta e entra na trilha com o ator do tipo cliente', async () => {
+    const { service, medidor, registrar } = montar();
+
+    await service.emitir(pedido());
+
+    expect(medidor.contarEmissao).toHaveBeenCalledWith('client_credentials');
+    expect(registrar).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'iam.oauth.token_issued',
+        actor: { id: 'cli_abc', type: 'client' },
+        outcome: 'success',
+      }),
+    );
+  });
+
+  it('recusa conta pelo código da RFC e entra na trilha', async () => {
+    const { service, medidor, registrar } = montar(null);
+
+    await expect(service.emitir(pedido())).rejects.toThrow();
+
+    expect(medidor.contarRecusa).toHaveBeenCalledWith('client_credentials', 'invalid_client');
+    expect(registrar).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'iam.oauth.token_denied', outcome: 'failure' }),
+    );
+  });
+
+  it('descasamento de cliente tem contador próprio', async () => {
+    const { service, medidor, rotacionar } = montar(clienteFake({ grantTypes: ['refresh_token'] }));
+    rotacionar.mockRejectedValueOnce(new ErroDeRefreshInvalido('cliente_divergente'));
+
+    await expect(
+      service.emitir(pedido({ grantType: 'refresh_token', refreshToken: 'opaco' })),
+    ).rejects.toThrow();
+
+    expect(medidor.contarDescasamentoDeCliente).toHaveBeenCalledOnce();
+  });
+
+  it('outras falhas de rotação não contam como descasamento', async () => {
+    const { service, medidor, rotacionar } = montar(clienteFake({ grantTypes: ['refresh_token'] }));
+    rotacionar.mockRejectedValueOnce(new ErroDeRefreshInvalido('idle_expirado'));
+
+    await expect(
+      service.emitir(pedido({ grantType: 'refresh_token', refreshToken: 'opaco' })),
+    ).rejects.toThrow();
+
+    expect(medidor.contarDescasamentoDeCliente).not.toHaveBeenCalled();
+  });
+
+  it('a trilha não recebe segredo nem token', async () => {
+    const { service, registrar } = montar();
+
+    await service.emitir(pedido());
+
+    const evento = JSON.stringify(registrar.mock.calls[0]?.[0]);
+    expect(evento).not.toContain('s3gr3d0');
+    expect(evento).not.toContain('jwt-cli');
+  });
+});
+
+describe('rotuloDeGrant', () => {
+  it('mantém os grants conhecidos', () => {
+    for (const grant of ['client_credentials', 'password', 'refresh_token']) {
+      expect(rotuloDeGrant(grant)).toBe(grant);
+    }
+  });
+
+  it('colapsa qualquer outro valor', () => {
+    // `grant_type` vem do corpo: sem fechar a lista, qualquer requisição anônima criaria
+    // uma série nova no Prometheus.
+    expect(rotuloDeGrant('authorization_code')).toBe('desconhecido');
+    expect(rotuloDeGrant('a'.repeat(64))).toBe('desconhecido');
+    expect(rotuloDeGrant('')).toBe('desconhecido');
   });
 });
