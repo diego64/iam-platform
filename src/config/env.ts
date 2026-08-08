@@ -272,14 +272,26 @@ export const esquemaEnv = z.object({
   // Mongo lento não derruba o login — segura, que na prática dá no mesmo.
   RATE_LIMIT_STORE_TIMEOUT_MS: z.coerce.number().int().min(10).max(5_000).default(200),
 
-  // Rate limit do login por IP. Teto apertado: login é alvo clássico de brute force.
+  // Rate limit do login. O teto por IP é apertado — login é alvo clássico de brute force —
+  // e o teto por conta é o que fecha o ataque distribuído: mil IPs contra a mesma conta não
+  // tocam no limite por IP, e é exatamente assim que uma senha fraca cai.
   RATE_LIMIT_LOGIN_MAX: z.coerce.number().int().min(1).default(5),
+  RATE_LIMIT_LOGIN_ACCOUNT_MAX: z.coerce.number().int().min(1).default(10),
   RATE_LIMIT_LOGIN_WINDOW_MS: z.coerce
     .number()
     .int()
     .min(1000)
     .max(60 * 60 * 1000)
     .default(60 * 1000),
+
+  // Endpoint de token: por IP e por cliente autenticado.
+  RATE_LIMIT_OAUTH_IP_MAX: z.coerce.number().int().min(1).default(30),
+  RATE_LIMIT_OAUTH_CLIENT_MAX: z.coerce.number().int().min(1).default(10),
+
+  // Verificação do segundo fator. O teto por conta é baixo porque o desafio já limita as
+  // tentativas; este contém quem cria desafios em série para ganhar tentativas novas.
+  RATE_LIMIT_MFA_IP_MAX: z.coerce.number().int().min(1).default(10),
+  RATE_LIMIT_MFA_ACCOUNT_MAX: z.coerce.number().int().min(1).default(5),
 
   // Origens que o navegador pode usar para chamar esta API, separadas por vírgula.
   // Default vazio = nenhuma origem liberada: um IdP não tem front próprio por definição, e
