@@ -12,5 +12,9 @@ skill-observations/
 !.env.example
 *.pem
 *.key
+# Identidade age que decifra os backups. Versioná-la anularia a cifra em repouso: o
+# artefato e a chave que o abre passariam a viver no mesmo lugar.
+*identity*.txt
+backups/
 security/sbom/*.json
 CLAUDE.md

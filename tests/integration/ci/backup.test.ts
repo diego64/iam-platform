@@ -8,7 +8,15 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFile } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -60,6 +68,9 @@ async function rodar(
         POSTGRES_URL: 'postgres://localhost:5432/x',
         MONGODB_URL: 'mongodb://localhost:27017',
         DIRETORIO_BACKUP: join(raiz, 'backups'),
+        // Estes casos exercitam a verificação de conteúdo, não a cifra: sem o destinatário
+        // declarado, o script recusaria antes de chegar ao ponto que eles medem.
+        BACKUP_PERMITIR_SEM_CIFRA: '1',
         ...ambiente,
       },
     });
@@ -160,5 +171,125 @@ describe('configuração inválida', () => {
     const resultado = await rodar('--postgres', { POSTGRES_URL: '' });
 
     expect(resultado.codigo).not.toBe(0);
+  });
+});
+
+describe('cifra em repouso', () => {
+  /** Stub do `age`: marca o arquivo como cifrado sem precisar do binário real. */
+  function criarStubDeAge(): void {
+    const age = `#!/usr/bin/env bash
+args=("$@")
+destino=""
+for ((i = 0; i < \${#args[@]}; i++)); do
+  if [[ "\${args[i]}" == "-o" ]]; then destino="\${args[i + 1]}"; fi
+done
+origem="\${args[-1]}"
+{ echo "age-encryption.org/v1"; cat "$origem"; } > "$destino"
+exit 0
+`;
+    writeFileSync(join(raiz, 'bin', 'age'), age);
+    chmodSync(join(raiz, 'bin', 'age'), 0o755);
+  }
+
+  it('recusa gravar sem destinatário declarado', async () => {
+    criarStubsDeDump(4096);
+
+    const resultado = await rodar('--all', { BACKUP_PERMITIR_SEM_CIFRA: '' });
+
+    expect(resultado.codigo).toBe(2);
+    expect(resultado.saida).toContain('BACKUP_AGE_RECIPIENT');
+  });
+
+  it('cifra o artefato quando há destinatário', async () => {
+    criarStubsDeDump(4096);
+    criarStubDeAge();
+
+    const resultado = await rodar('--all', {
+      BACKUP_PERMITIR_SEM_CIFRA: '',
+      BACKUP_AGE_RECIPIENT: 'age1exemplo',
+    });
+
+    expect(resultado.codigo).toBe(0);
+    expect(resultado.saida).toContain('.dump.age');
+    expect(resultado.saida).toContain('.archive.age');
+  });
+
+  it('não deixa material em claro no diretório de destino', async () => {
+    criarStubsDeDump(4096);
+    criarStubDeAge();
+
+    await rodar('--all', { BACKUP_PERMITIR_SEM_CIFRA: '', BACKUP_AGE_RECIPIENT: 'age1exemplo' });
+
+    const arquivos = readdirSync(join(raiz, 'backups'));
+    expect(arquivos.filter((nome) => /\.(dump|archive)$/.test(nome))).toEqual([]);
+  });
+});
+
+describe('manifesto e checksums', () => {
+  it('grava o manifesto com os arquivos gerados e o total de bytes', async () => {
+    criarStubsDeDump(4096);
+
+    await rodar('--all');
+
+    const arquivos = readdirSync(join(raiz, 'backups'));
+    const manifesto = arquivos.find((nome) => nome.startsWith('manifest-'));
+    expect(manifesto).toBeDefined();
+
+    const conteudo = JSON.parse(readFileSync(join(raiz, 'backups', manifesto ?? ''), 'utf8')) as {
+      bytes: number;
+      arquivos: string[];
+      cifrado: boolean;
+    };
+    expect(conteudo.bytes).toBe(8192);
+    expect(conteudo.arquivos).toHaveLength(2);
+    expect(conteudo.cifrado).toBe(false);
+  });
+
+  it('grava os checksums dos artefatos', async () => {
+    criarStubsDeDump(4096);
+
+    await rodar('--all');
+
+    const arquivos = readdirSync(join(raiz, 'backups'));
+    const somas = arquivos.find((nome) => nome.startsWith('SHA256SUMS-'));
+    expect(somas).toBeDefined();
+    expect(readFileSync(join(raiz, 'backups', somas ?? ''), 'utf8')).toContain('pg-');
+  });
+
+  it('registra o resultado no arquivo de estado', async () => {
+    criarStubsDeDump(4096);
+    const estado = join(raiz, 'estado.json');
+
+    await rodar('--all', { BACKUP_STATUS_FILE: estado });
+
+    expect(JSON.parse(readFileSync(estado, 'utf8'))).toMatchObject({ resultado: 'ok' });
+  });
+
+  it('registra a falha no arquivo de estado quando o artefato é suspeito', async () => {
+    criarStubsDeDump(0);
+    const estado = join(raiz, 'estado.json');
+
+    await rodar('--all', { BACKUP_STATUS_FILE: estado });
+
+    expect(JSON.parse(readFileSync(estado, 'utf8'))).toMatchObject({ resultado: 'falha' });
+  });
+});
+
+describe('conferência de artefatos já gerados', () => {
+  it('aceita --validate e confere o que existe no diretório', async () => {
+    criarStubsDeDump(4096);
+    await rodar('--all');
+
+    const resultado = await rodar('--validate');
+
+    expect(resultado.codigo).toBe(0);
+    expect(resultado.saida).toContain('Backup verificado');
+  });
+
+  it('sai 1 quando não há nada para validar', async () => {
+    const resultado = await rodar('--validate');
+
+    expect(resultado.codigo).toBe(1);
+    expect(resultado.saida).toContain('Nenhum backup encontrado');
   });
 });
