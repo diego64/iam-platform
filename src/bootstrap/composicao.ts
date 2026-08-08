@@ -65,11 +65,19 @@ import {
 import {
   criarApiClientService,
   criarCatalogoDeEscopos,
+  criarClientAuthService,
   criarMedidorDeClientes,
   criarRepositorioDeClientes,
   criarResolvedorDeEscopos,
 } from '../modules/api-clients/index.js';
 import type { DependenciasDasRotasDeClientes } from '../modules/api-clients/routes/api-client.routes.js';
+import {
+  criarMedidorDeOAuth,
+  criarMetadataService,
+  criarOAuthService,
+  type DependenciasDasRotasDeMetadados,
+  type DependenciasDasRotasDeOAuth,
+} from '../modules/oauth/index.js';
 import {
   criarKeyRotationService,
   criarMedidorDeJwks,
@@ -123,6 +131,8 @@ export interface DependenciasDaComposicao {
 export interface ModulosDaAplicacao {
   readonly auth: DependenciasDasRotasDeAuth;
   readonly refresh: DependenciasDasRotasDeRefresh;
+  readonly oauth: DependenciasDasRotasDeOAuth;
+  readonly metadadosDeOAuth: DependenciasDasRotasDeMetadados;
   readonly senha: DependenciasDeSenha;
   readonly users: DependenciasDeUsuarios;
   readonly rbac: DependenciasDasRotasDeRbac;
@@ -263,14 +273,43 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
     ...(metricas ? { medidor: criarMedidorDeAbac() } : {}),
   });
 
+  const repoClientes = criarRepositorioDeClientes(pool);
   const clienteService = criarApiClientService({
-    repo: criarRepositorioDeClientes(pool),
+    repo: repoClientes,
     escopos: criarResolvedorDeEscopos(criarCatalogoDeEscopos(pool)),
     servicoDeSenha,
     logger,
     auditoria,
     sobreposicaoPadraoMs: env.CLIENT_SECRET_OVERLAP_DEFAULT_MS,
     ...(metricas ? { medidor: criarMedidorDeClientes() } : {}),
+  });
+
+  const repoPermissoes = criarRepositorioDePermissao(pool);
+
+  const oauthService = criarOAuthService({
+    clientAuth: criarClientAuthService({
+      repo: repoClientes,
+      servicoDeSenha,
+      logger,
+      throttleDeUsoMs: env.CLIENT_LAST_USED_THROTTLE_MS,
+      ...(metricas ? { medidor: criarMedidorDeClientes() } : {}),
+    }),
+    tokenService,
+    authService,
+    refreshTokenService,
+    auditoria,
+    passwordGrantHabilitado: env.OAUTH_PASSWORD_GRANT_ENABLED,
+    ...(metricas ? { medidor: criarMedidorDeOAuth() } : {}),
+  });
+
+  const metadataService = criarMetadataService({
+    emissor: env.JWT_ISSUER,
+    urlBase: env.JWT_ISSUER,
+    passwordGrantHabilitado: env.OAUTH_PASSWORD_GRANT_ENABLED,
+    // Teto alto o bastante para o catálogo inteiro de uma instalação real; o documento é
+    // de descoberta, e uma lista truncada em silêncio seria pior que uma consulta cara.
+    listarEscopos: async () =>
+      (await repoPermissoes.listar({ limite: 500, offset: 0 })).map((p) => p.name),
   });
 
   const rotacao =
@@ -293,6 +332,8 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
   return {
     auth: { authService, verificarAccessToken },
     refresh: { refreshTokenService },
+    oauth: { oauthService },
+    metadadosDeOAuth: { metadataService },
     senha: { passwordService, autenticar: idAutenticado },
     users: {
       userService: criarUserService({
@@ -307,7 +348,7 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
     rbac: {
       rbacService: criarRbacService({
         papeis: criarRepositorioDePapel(pool),
-        permissoes: criarRepositorioDePermissao(pool),
+        permissoes: repoPermissoes,
         associacoes: repoAssociacoes,
         auditoria,
       }),
