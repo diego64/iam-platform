@@ -49,7 +49,12 @@ import {
   criarRepositorioDeClientes,
   criarResolvedorDeEscopos,
 } from '../../../src/modules/api-clients/index.js';
-import { registrarRotasDeOAuth, criarOAuthService } from '../../../src/modules/oauth/index.js';
+import {
+  registrarRotasDeOAuth,
+  registrarRotasDeMetadados,
+  criarMetadataService,
+  criarOAuthService,
+} from '../../../src/modules/oauth/index.js';
 
 const TIPO_PROBLEM_JSON = 'application/problem+json';
 export const EMISSOR = 'https://iam.example.com';
@@ -157,6 +162,15 @@ export async function montarAppDeOAuth(opcoes: {
       authService,
       refreshTokenService,
       passwordGrantHabilitado: opcoes.passwordGrantHabilitado ?? true,
+    }),
+  });
+
+  registrarRotasDeMetadados(app, {
+    metadataService: criarMetadataService({
+      emissor: EMISSOR,
+      urlBase: EMISSOR,
+      passwordGrantHabilitado: opcoes.passwordGrantHabilitado ?? true,
+      listarEscopos: () => Promise.resolve(['orders:read', 'orders:write']),
     }),
   });
 

@@ -17,6 +17,8 @@ import { recriarSchema } from '../users/schema.js';
 import { aplicarMetadadosRbac } from '../rbac/schema.js';
 import { recriarSchemaJwks } from '../jwks/schema.js';
 import { aplicarClientes, limparClientes } from '../api-clients/schema.js';
+import { LIMITE_TOKEN } from '../../../src/modules/oauth/hooks/token-rate-limit.js';
+import { digerirToken, gerarTokenOpaco } from '../../../src/modules/refresh-token/index.js';
 import {
   AUDIENCIA,
   CABECALHO_FORMULARIO,
@@ -469,5 +471,88 @@ describe('travas do endpoint', () => {
 
     expect(res.statusCode).toBeGreaterThanOrEqual(400);
     expect(res.headers['content-type']).toContain('problem+json');
+  });
+});
+
+describe('rate limit', () => {
+  it('excedido, responde 429 no formato da RFC com Retry-After', async () => {
+    const cliente = await criarCliente('rl-cliente', ['orders:read'], ['client_credentials']);
+    const cabecalhos = {
+      ...CABECALHO_FORMULARIO,
+      authorization: basic(cliente.client_id, cliente.client_secret),
+    };
+    // IP fixo: o limite é por origem, e variar o endereço nunca alcançaria o teto.
+    const origem = '10.30.0.7';
+
+    let excedida: Awaited<ReturnType<typeof app.inject>> | null = null;
+    for (let tentativa = 0; tentativa <= LIMITE_TOKEN.max; tentativa += 1) {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/oauth/token',
+        remoteAddress: origem,
+        headers: cabecalhos,
+        payload: formulario({ grant_type: 'client_credentials' }),
+      });
+      if (res.statusCode === 429) {
+        excedida = res;
+        break;
+      }
+    }
+
+    expect(excedida).not.toBeNull();
+    expect(excedida?.headers['retry-after']).toBeDefined();
+    expect(excedida?.json<{ error: string }>().error).toBe('slow_down');
+    expect(excedida?.headers['cache-control']).toBe('no-store');
+  });
+});
+
+describe('metadados do servidor', () => {
+  it('publica o documento da RFC 8414 com cache público', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/.well-known/oauth-authorization-server',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['cache-control']).toBe('public, max-age=3600');
+    expect(res.json()).toMatchObject({
+      issuer: EMISSOR,
+      token_endpoint: `${EMISSOR}/oauth/token`,
+      jwks_uri: `${EMISSOR}/.well-known/jwks.json`,
+      grant_types_supported: ['client_credentials', 'password', 'refresh_token'],
+      response_types_supported: [],
+    });
+  });
+});
+
+describe('sessão anterior ao vínculo com cliente', () => {
+  it('documento sem client_id continua rotacionando pelo /auth/refresh', async () => {
+    // Reproduz o que já existe em produção: refresh gravado antes desta SPEC, sem os campos
+    // de vínculo. Ele precisa continuar valendo — nenhuma sessão viva pode cair no deploy.
+    const usuario = await pool.query<{ id: string }>('SELECT id FROM users WHERE email = $1', [
+      ADMIN,
+    ]);
+    const token = gerarTokenOpaco();
+    const agora = Date.now();
+    await banco.collection('refresh_tokens').insertOne({
+      token_hash: digerirToken(token),
+      family_id: 'familia-legada',
+      user_id: usuario.rows[0]?.id,
+      status: 'active',
+      created_at: new Date(agora),
+      rotated_at: null,
+      idle_expires_at: new Date(agora + 60_000),
+      absolute_expires_at: new Date(agora + 600_000),
+      expires_at: new Date(agora + 600_000),
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/auth/refresh',
+      remoteAddress: '10.19.0.30',
+      payload: { refresh_token: token },
+    });
+
+    expect(res.statusCode).toBe(200);
   });
 });
