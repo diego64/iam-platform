@@ -277,7 +277,7 @@ describe('removerFator', () => {
   it('limpa tudo sem pedir senha — é o caminho administrativo', async () => {
     const { service, removerFatores, removerCodigos, removerDesafios } = montar({});
 
-    await expect(service.removerFator('u1')).resolves.toBe(true);
+    await expect(service.removerFator('u1', 'admin-1')).resolves.toBe(true);
     expect(removerFatores).toHaveBeenCalledWith('u1');
     expect(removerCodigos).toHaveBeenCalledWith('u1');
     expect(removerDesafios).toHaveBeenCalledWith('u1');

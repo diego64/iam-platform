@@ -75,6 +75,7 @@ export interface ControllerDeMfa {
   desativar(requisicao: FastifyRequest, resposta: FastifyReply): Promise<void>;
   regenerar(requisicao: FastifyRequest, resposta: FastifyReply): Promise<void>;
   verificar(requisicao: FastifyRequest, resposta: FastifyReply): Promise<void>;
+  resetar(requisicao: FastifyRequest, resposta: FastifyReply): Promise<void>;
 }
 
 export function criarControllerDeMfa(deps: DependenciasDoControllerDeMfa): ControllerDeMfa {
@@ -169,6 +170,26 @@ export function criarControllerDeMfa(deps: DependenciasDoControllerDeMfa): Contr
         const codigos = await deps.mfaService.regenerarCodigos(userId, senha);
         await resposta.status(200).send({ recovery_codes: codigos });
       });
+    },
+
+    async resetar(requisicao, resposta): Promise<void> {
+      const atorId = deps.autenticar(requisicao);
+      if (atorId === null) {
+        await semToken(resposta);
+        return;
+      }
+      const { id } = requisicao.params as { id: string };
+
+      const removido = await deps.mfaService.removerFator(id, atorId);
+      if (!removido) {
+        await responderErro(resposta, 'nao-habilitado');
+        return;
+      }
+      requisicao.log.info(
+        { evento: 'mfa.resetado', ator_id: atorId, alvo_id: id },
+        'segundo fator removido pela administração',
+      );
+      await resposta.status(204).send();
     },
 
     async verificar(requisicao, resposta): Promise<void> {

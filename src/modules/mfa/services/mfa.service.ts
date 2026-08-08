@@ -22,6 +22,11 @@ import { QUANTIDADE_PADRAO, gerarCodigosDeRecuperacao } from './recovery-codes.j
 import type { RepositorioDeFatorDeMfa } from '../repositories/mfa-factor.repository.js';
 import type { RepositorioDeCodigosDeRecuperacao } from '../repositories/recovery-code.repository.js';
 import type { RepositorioDeDesafioDeMfa } from '../repositories/mfa-challenge.repository.js';
+import { medidorDeMfaNulo, type MedidorDeMfa } from '../metrics/mfa.metrics.js';
+import {
+  registradorNulo,
+  type RegistradorDeAuditoria,
+} from '../../audit/interfaces/audit-recorder.js';
 
 export interface LeituraDeUsuario {
   buscarPorId(id: string): Promise<Usuario | null>;
@@ -40,6 +45,14 @@ export interface DependenciasDoMfaService {
   readonly emissor: string;
   readonly quantidadeDeCodigos?: number;
   readonly janela?: number;
+  readonly medidor?: MedidorDeMfa;
+  /** Trilha de auditoria. Ausente, o serviço roda sem registrar — o padrão nos testes. */
+  readonly auditoria?: RegistradorDeAuditoria;
+  /**
+   * Derruba as sessões do usuário. Usado no reset administrativo: se a conta caiu porque o
+   * telefone foi roubado, deixar as sessões vivas anula o reset.
+   */
+  readonly sessoes?: { revogarTodas(userId: string): Promise<void> };
 }
 
 export interface CadastroIniciado {
@@ -68,11 +81,13 @@ export interface MfaService {
   desativar(userId: string, senha: string): Promise<void>;
   regenerarCodigos(userId: string, senha: string): Promise<readonly string[]>;
   /** Remove o fator de outra pessoa — o caminho administrativo para conta travada. */
-  removerFator(userId: string): Promise<boolean>;
+  removerFator(userId: string, atorId: string): Promise<boolean>;
 }
 
 export function criarMfaService(deps: DependenciasDoMfaService): MfaService {
   const quantidade = deps.quantidadeDeCodigos ?? QUANTIDADE_PADRAO;
+  const medidor = deps.medidor ?? medidorDeMfaNulo();
+  const auditoria = deps.auditoria ?? registradorNulo();
 
   async function exigirUsuario(userId: string): Promise<Usuario> {
     const usuario = await deps.usuarios.buscarPorId(userId);
@@ -112,6 +127,7 @@ export function criarMfaService(deps: DependenciasDoMfaService): MfaService {
         label,
       });
 
+      medidor.contarCadastro('started');
       const uriOtpauth = montarUriOtpauth({
         segredo,
         emissor: deps.emissor,
@@ -144,6 +160,13 @@ export function criarMfaService(deps: DependenciasDoMfaService): MfaService {
       }
 
       const codigosDeRecuperacao = await emitirCodigos(userId);
+      medidor.contarCadastro('confirmed');
+      await auditoria.registrar({
+        type: 'iam.mfa.enrolled',
+        actor: { id: userId, type: 'user' },
+        outcome: 'success',
+        metadata: { tipo: 'totp' },
+      });
       const ativo = await deps.fatores.buscarAtivo(userId);
       return {
         confirmadoEm: ativo?.confirmadoEm ?? new Date(),
@@ -189,6 +212,13 @@ export function criarMfaService(deps: DependenciasDoMfaService): MfaService {
       }
       await deps.codigos.removerDoUsuario(userId);
       await deps.desafios.removerDoUsuario(userId);
+      medidor.contarCadastro('disabled');
+      await auditoria.registrar({
+        type: 'iam.mfa.disabled',
+        actor: { id: userId, type: 'user' },
+        outcome: 'success',
+        reason: 'self_service',
+      });
     },
 
     async regenerarCodigos(userId, senha): Promise<readonly string[]> {
@@ -201,10 +231,24 @@ export function criarMfaService(deps: DependenciasDoMfaService): MfaService {
       return emitirCodigos(userId);
     },
 
-    async removerFator(userId): Promise<boolean> {
+    async removerFator(userId, atorId): Promise<boolean> {
       const removidos = await deps.fatores.removerDoUsuario(userId);
       await deps.codigos.removerDoUsuario(userId);
       await deps.desafios.removerDoUsuario(userId);
+      // Derrubar as sessões é o ponto: se a conta caiu porque o telefone foi roubado,
+      // deixar as sessões existentes vivas anula o reset.
+      await deps.sessoes?.revogarTodas(userId);
+
+      if (removidos > 0) {
+        medidor.contarCadastro('reset');
+      }
+      await auditoria.registrar({
+        type: 'iam.mfa.reset',
+        actor: { id: atorId, type: 'user' },
+        target: { id: userId, type: 'user' },
+        outcome: 'success',
+        reason: 'admin_action',
+      });
       return removidos > 0;
     },
   };
