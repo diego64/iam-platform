@@ -10,6 +10,7 @@
  *  - O que sai daqui é exatamente o que `app.ts` precisa para registrar cada módulo — o
  *    formato dos objetos é o das dependências de rota, para não haver tradução no meio.
  */
+import type { FastifyReply } from 'fastify';
 import type { Db } from 'mongodb';
 import type { Pool } from 'pg';
 import type { Env } from '../config/env.js';
@@ -21,6 +22,7 @@ import { criarPoliticaDeRateLimit } from '../shared/rate-limit/politica.js';
 import { criarHookDeLimitePorIdentidade } from '../shared/rate-limit/hook-por-identidade.js';
 import { criarMedidorDeRateLimit } from '../shared/rate-limit/rate-limit.metrics.js';
 import { problemaDeRateLimit } from '../shared/rate-limit/resposta-429.js';
+import { clientIdApresentado } from '../modules/oauth/services/client-credentials.js';
 import type { ContadorDeRateLimit } from '../shared/rate-limit/types.js';
 import {
   criarAuthService,
@@ -85,6 +87,7 @@ import {
   criarRepositorioDeDesafioDeMfa,
   criarRepositorioDeFatorDeMfa,
   criarServicoDeDesafioDeMfa,
+  digerirTokenDeDesafio,
   type DependenciasDasRotasDeMfa,
 } from '../modules/mfa/index.js';
 import {
@@ -322,6 +325,32 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
   });
 
   /** Barra com o 429 padrão da plataforma — problem+json com `Retry-After`. */
+  async function barrarComProblemJson(
+    resposta: FastifyReply,
+    retryAfterSegundos: number,
+  ): Promise<void> {
+    await resposta
+      .status(429)
+      .header('retry-after', String(retryAfterSegundos))
+      .type('application/problem+json')
+      .send(problemaDeRateLimit());
+  }
+
+  /**
+   * Barra no formato da RFC 6749. `/oauth/*` tem vocabulário próprio de erro (SPEC 012), e
+   * misturar problem+json ali quebraria as bibliotecas cliente de OAuth.
+   */
+  async function barrarComSlowDown(
+    resposta: FastifyReply,
+    retryAfterSegundos: number,
+  ): Promise<void> {
+    await resposta
+      .status(429)
+      .header('retry-after', String(retryAfterSegundos))
+      .type('application/json')
+      .send({ error: 'slow_down', error_description: 'Limite de requisições excedido.' });
+  }
+
   const limitePorConta = criarHookDeLimitePorIdentidade({
     politica: politicaDeLimite,
     dimensao: 'conta',
@@ -331,13 +360,17 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
       const corpo = requisicao.body as { email?: unknown } | undefined;
       return typeof corpo?.email === 'string' ? corpo.email : null;
     },
-    responder: async (resposta, retryAfterSegundos) => {
-      await resposta
-        .status(429)
-        .header('retry-after', String(retryAfterSegundos))
-        .type('application/problem+json')
-        .send(problemaDeRateLimit());
-    },
+    responder: barrarComProblemJson,
+  });
+
+  const limitePorCliente = criarHookDeLimitePorIdentidade({
+    politica: politicaDeLimite,
+    dimensao: 'cliente',
+    teto: env.RATE_LIMIT_OAUTH_CLIENT_MAX,
+    janelaMs: env.RATE_LIMIT_LOGIN_WINDOW_MS,
+    identificar: (requisicao) =>
+      clientIdApresentado(requisicao.headers.authorization, requisicao.body ?? {}),
+    responder: barrarComSlowDown,
   });
 
   const authService = criarAuthService({
@@ -429,11 +462,26 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
     rateLimit: { contador: contadorDeLimite, pepper: pepperDeLimite },
     auth: { authService, verificarAccessToken, limitePorConta },
     refresh: { refreshTokenService },
-    oauth: { oauthService },
+    oauth: { oauthService, limitePorCliente },
     ...(env.MASTER_KEY === undefined
       ? {}
       : {
           mfa: {
+            // A cota é do usuário, não do desafio: sem isto, pedir um desafio novo zeraria
+            // o contador e o teto por tentativa viraria decoração.
+            limitePorConta: criarHookDeLimitePorIdentidade({
+              politica: politicaDeLimite,
+              dimensao: 'conta',
+              teto: env.RATE_LIMIT_MFA_ACCOUNT_MAX,
+              janelaMs: env.RATE_LIMIT_LOGIN_WINDOW_MS,
+              identificar: async (requisicao) => {
+                const corpo = requisicao.body as { mfa_token?: unknown } | undefined;
+                if (typeof corpo?.mfa_token !== 'string') return null;
+                const desafio = await repoDesafios.buscar(digerirTokenDeDesafio(corpo.mfa_token));
+                return desafio?.userId ?? null;
+              },
+              responder: barrarComProblemJson,
+            }),
             mfaService: criarMfaService({
               fatores: repoFatores,
               codigos: repoCodigos,

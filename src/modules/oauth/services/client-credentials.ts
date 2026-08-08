@@ -63,6 +63,25 @@ function lerBasic(cabecalho: string | undefined): CredencialDeCliente | null {
  * @throws {ErroDeOAuth} `invalid_request` quando os dois métodos vêm juntos;
  *         `invalid_client` quando não vem nenhum ou o Basic está malformado.
  */
+/**
+ * O `client_id` apresentado, sem julgar se ele é válido — ou `null` quando não dá para
+ * saber quem está tentando.
+ *
+ * Existe para o rate limit por cliente, que precisa de uma chave **antes** de a autenticação
+ * acontecer: é justamente quem erra o segredo em série que ele contém. Por isso não lança e
+ * não distingue os motivos, ao contrário da extração que a emissão usa.
+ */
+export function clientIdApresentado(
+  cabecalhoAuthorization: string | undefined,
+  corpo: CamposDeCredencial,
+): string | null {
+  try {
+    return lerBasic(cabecalhoAuthorization)?.clientId ?? corpo.client_id ?? null;
+  } catch {
+    return corpo.client_id ?? null;
+  }
+}
+
 export function extrairCredencialDeCliente(
   cabecalhoAuthorization: string | undefined,
   corpo: CamposDeCredencial,

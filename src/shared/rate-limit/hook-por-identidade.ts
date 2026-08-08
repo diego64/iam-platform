@@ -28,8 +28,15 @@ export interface ConfiguracaoDoHook {
   readonly dimensao: DimensaoDeLimite;
   readonly teto: number;
   readonly janelaMs: number;
-  /** Extrai a identidade da requisição. `null` quando não há o que limitar. */
-  readonly identificar: (requisicao: FastifyRequest) => string | null;
+  /**
+   * Extrai a identidade da requisição. `null` quando não há o que limitar.
+   *
+   * Pode ser assíncrono: a identidade nem sempre está no corpo. Na verificação de segundo
+   * fator, por exemplo, o que chega é o token do desafio, e a conta por trás dele só sai de
+   * uma consulta — e é a conta que precisa ter cota, senão bastaria pedir um desafio novo
+   * para zerar o contador.
+   */
+  readonly identificar: (requisicao: FastifyRequest) => string | null | Promise<string | null>;
   /** Como responder ao excesso. Cada família de rota tem o seu formato. */
   readonly responder: (resposta: FastifyReply, retryAfterSegundos: number) => Promise<void>;
 }
@@ -67,7 +74,7 @@ export function criarHookDeLimitePorIdentidade(config: ConfiguracaoDoHook): Hook
 
   return {
     preHandler: async (requisicao, resposta) => {
-      const identidade = config.identificar(requisicao);
+      const identidade = await config.identificar(requisicao);
       if (identidade === null) return;
 
       // Guardado na requisição para o `onResponse` não repetir a extração — e para ele não

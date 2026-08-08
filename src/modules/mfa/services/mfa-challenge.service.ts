@@ -39,8 +39,14 @@ export interface DependenciasDoDesafioDeMfa {
   readonly medidor?: MedidorDeMfa;
 }
 
-/** O token em claro nunca é gravado — só este digest. */
-function digerirToken(token: string): string {
+/**
+ * O token em claro nunca é gravado — só este digest.
+ *
+ * Exportado porque o rate limit por conta na verificação precisa descobrir de quem é o
+ * desafio antes de resolvê-lo: a cota é do usuário, e não do desafio, senão bastaria pedir
+ * um desafio novo para zerar o contador.
+ */
+export function digerirTokenDeDesafio(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
 
@@ -56,7 +62,7 @@ export function criarServicoDeDesafioDeMfa(deps: DependenciasDoDesafioDeMfa): Po
 
       const token = randomBytes(32).toString('base64url');
       await deps.desafios.criar({
-        tokenHash: digerirToken(token),
+        tokenHash: digerirTokenDeDesafio(token),
         userId,
         expiraEm: new Date(Date.now() + deps.ttlMs),
       });
@@ -69,7 +75,7 @@ export function criarServicoDeDesafioDeMfa(deps: DependenciasDoDesafioDeMfa): Po
       mfaToken: string,
       resposta: RespostaAoDesafio,
     ): Promise<DesafioResolvido | null> {
-      const hash = digerirToken(mfaToken);
+      const hash = digerirTokenDeDesafio(mfaToken);
       const desafio = await deps.desafios.buscar(hash);
       if (desafio === null) {
         return null;

@@ -19,8 +19,15 @@ import { registrarParserDeFormulario } from './form-body.js';
 import { registrarTratadorDeErro } from './oauth-error-handler.js';
 import { LIMITE_TOKEN } from '../hooks/token-rate-limit.js';
 import { ErroDeOAuth } from '../errors/oauth-error.js';
+import type { HooksDeLimite } from '../../../shared/rate-limit/hook-por-identidade.js';
 
-export type DependenciasDasRotasDeOAuth = DependenciasDoControllerDeOAuth;
+export interface DependenciasDasRotasDeOAuth extends DependenciasDoControllerDeOAuth {
+  /**
+   * Limite por cliente. Ausente, vale só o limite por IP — e um cliente com muitos IPs
+   * varreria segredo sem tocar em teto nenhum.
+   */
+  readonly limitePorCliente?: HooksDeLimite;
+}
 
 const TIPO_ESPERADO = 'application/x-www-form-urlencoded';
 
@@ -54,6 +61,14 @@ export async function registrarRotasDeOAuth(
           response: { 200: respostaDeToken, 400: erroDeOAuth, 401: erroDeOAuth },
         },
         config: { rateLimit: LIMITE_TOKEN },
+        // O limite por IP roda no plugin, antes do corpo; o por cliente precisa do
+        // `client_id`, que vem do header Basic ou do formulário já parseado.
+        ...(deps.limitePorCliente === undefined
+          ? {}
+          : {
+              preHandler: deps.limitePorCliente.preHandler,
+              onResponse: deps.limitePorCliente.onResponse,
+            }),
       },
       (requisicao, resposta) => controller.token(requisicao, resposta),
     );
