@@ -40,6 +40,19 @@ const CAMPOS_SENSIVEIS = [
   'secretHash',
   'previous_secret_hash',
   'previousSecretHash',
+  // Segundo fator. O segredo TOTP é credencial permanente — quem o lê gera código para
+  // sempre — e o `mfa_token` é o que separa a senha correta do par de tokens. O código de
+  // seis dígitos e o de recuperação entram junto: um deles no log é uma tentativa
+  // reaproveitável enquanto a janela durar.
+  'secret',
+  'otpauth_uri',
+  'mfa_token',
+  'mfaToken',
+  'code',
+  'recovery_code',
+  'recovery_codes',
+  'secret_encrypted',
+  'segredoCifrado',
 ] as const;
 
 /** Monta os caminhos de censura para o Pino a partir dos campos sensíveis. */
