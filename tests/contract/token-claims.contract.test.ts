@@ -27,8 +27,11 @@ function claimsDoPayload(): string[] {
 }
 
 describe('contrato de claims do Access Token', () => {
-  it('o payload carrega exatamente scope, roles e perm', () => {
-    expect(claimsDoPayload().sort()).toEqual(['perm', 'roles', 'scope']);
+  it('o payload carrega exatamente scope, roles, perm, sub_type e client_id', () => {
+    // `sub_type` e `client_id` entraram com a superfície OAuth2: um consumidor precisa saber
+    // se `sub` é pessoa ou aplicação, e qual cliente pediu o token. Ambas saem `undefined`
+    // (logo, ausentes do JSON) no login por senha — o token de sessão não mudou de forma.
+    expect(claimsDoPayload().sort()).toEqual(['client_id', 'perm', 'roles', 'scope', 'sub_type']);
   });
 
   it('as claims registradas continuam sendo emitidas', () => {
