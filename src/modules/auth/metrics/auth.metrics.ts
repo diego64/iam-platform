@@ -11,7 +11,12 @@ import { metrics } from '@opentelemetry/api';
 const ESCOPO = 'iam-platform';
 
 /** Por que o login falhou — genérico, nunca revela qual conta. */
-export type MotivoDeFalha = 'desconhecido' | 'senha' | 'bloqueado';
+export type MotivoDeFalha =
+  | 'desconhecido'
+  | 'senha'
+  | 'bloqueado'
+  /** Segundo fator não resolvido: desafio inválido, expirado, esgotado ou código errado. */
+  | 'mfa';
 
 const FRONTEIRAS_SEGUNDOS = [0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25];
 

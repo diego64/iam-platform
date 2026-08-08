@@ -10,11 +10,12 @@
  *    denylist entram por injeção.
  */
 import { ErroDeAutenticacao } from '../errors/auth-error.js';
-import type { ParDeTokens } from '../types/auth.types.js';
+import type { ParDeTokens, ResultadoDeLogin } from '../types/auth.types.js';
 import type { ServicoDeSenha } from '../../../shared/crypto/password.service.js';
 import type { RepositorioDeAutenticacao } from '../repositories/auth-user.repository.js';
 import type { RepositorioDeDenylist } from '../repositories/token-denylist.repository.js';
 import type { PortaDeRefreshToken } from '../interfaces/refresh-token.port.js';
+import type { MetodoDeMfa, PortaDeMfa, RespostaAoDesafio } from '../interfaces/mfa.port.js';
 import type { TokenService } from './token.service.js';
 import { medidorDeAuthNulo, type MedidorDeAuth } from '../metrics/auth.metrics.js';
 import {
@@ -52,6 +53,11 @@ export interface DependenciasDoAuthService {
   readonly scopePadrao?: string;
   /** Trilha de auditoria. Ausente, o serviço roda sem registrar — o padrão nos testes. */
   readonly auditoria?: RegistradorDeAuditoria;
+  /**
+   * Segundo fator. Ausente, o login é de um passo só — exatamente o comportamento de antes
+   * de existir MFA, e é isso que mantém a suíte da SPEC 001 válida sem edição.
+   */
+  readonly mfa?: PortaDeMfa;
 }
 
 /** Autoridade final do token, depois de qualquer recorte de quem pediu a emissão. */
@@ -84,7 +90,17 @@ export interface OpcoesDeLogin {
 }
 
 export interface AuthService {
-  login(credenciais: Credenciais, opcoes?: OpcoesDeLogin): Promise<ParDeTokens>;
+  /**
+   * Autentica a senha. Devolve o par de tokens quando a conta não tem segundo fator, ou o
+   * desafio quando tem — os dois são caminho feliz.
+   */
+  login(credenciais: Credenciais, opcoes?: OpcoesDeLogin): Promise<ResultadoDeLogin>;
+  /** Troca um desafio resolvido pelo par de tokens. */
+  concluirDesafio(
+    mfaToken: string,
+    resposta: RespostaAoDesafio,
+    opcoes?: OpcoesDeLogin,
+  ): Promise<ParDeTokens>;
   logout(dados: DadosDeLogout): Promise<void>;
   perfil(userId: string): Promise<PerfilDoUsuario | null>;
 }
@@ -111,8 +127,61 @@ export function criarAuthService(deps: DependenciasDoAuthService): AuthService {
     });
   }
 
+  /**
+   * A cauda comum das duas portas de entrada: recarrega papéis e permissões, aplica o
+   * recorte de autoridade, assina o token e emite o refresh.
+   *
+   * Existe uma vez só de propósito. Com duas cópias, a próxima claim nasceria num caminho e
+   * faltaria no outro — e o caminho esquecido seria justamente o do segundo fator, que é
+   * usado por menos gente e demoraria a aparecer.
+   */
+  async function emitirPar(
+    userId: string,
+    opcoes: OpcoesDeLogin | undefined,
+    metodo: MetodoDeMfa | null,
+  ): Promise<ParDeTokens> {
+    const [roles, permissions] = await Promise.all([
+      deps.repo.papeisDoUsuario(userId),
+      deps.repo.permissoesEfetivas(userId),
+    ]);
+    // Sem recorte, o token carrega a autoridade inteira do usuário e o escopo padrão.
+    const concedida: AutoridadeConcedida = opcoes?.restringirAutoridade?.(permissions) ?? {
+      permissoes: permissions,
+      escopo: scope,
+    };
+    const emitido = await deps.tokenService.emitir(
+      {
+        sub: userId,
+        roles,
+        permissions: [...concedida.permissoes],
+        scope: concedida.escopo,
+        // `sub_type` só aparece quando a emissão passou por um cliente: um consumidor que
+        // recebe token de duas origens precisa saber que ali há uma pessoa por trás. O
+        // token do login por senha continua sem a claim.
+        ...(opcoes?.clientId === undefined
+          ? {}
+          : { clientId: opcoes.clientId, subType: 'user' as const }),
+        // `amr`/`mfa` idem: só existem quando houve segundo fator.
+        ...(metodo === null ? {} : { amr: ['pwd', metodo], mfa: true }),
+      },
+      opcoes?.ttlSegundos === undefined ? undefined : { ttlSegundos: opcoes.ttlSegundos },
+    );
+    const refreshToken = await deps.refreshToken.emitir(userId, {
+      ...(opcoes?.clientId === undefined
+        ? {}
+        : { clientId: opcoes.clientId, escopo: concedida.escopo }),
+      ...(metodo === null ? {} : { amr: ['pwd', metodo] }),
+    });
+
+    return {
+      accessToken: emitido.token,
+      refreshToken,
+      expiraEmSegundos: emitido.ttlSegundos,
+    };
+  }
+
   return {
-    async login(credenciais: Credenciais, opcoes?: OpcoesDeLogin): Promise<ParDeTokens> {
+    async login(credenciais: Credenciais, opcoes?: OpcoesDeLogin): Promise<ResultadoDeLogin> {
       const usuario = await deps.repo.buscarPorEmail(credenciais.email);
 
       if (usuario === null) {
@@ -147,36 +216,18 @@ export function criarAuthService(deps: DependenciasDoAuthService): AuthService {
         throw new ErroDeAutenticacao('credencial-invalida');
       }
 
-      const [roles, permissions] = await Promise.all([
-        deps.repo.papeisDoUsuario(usuario.id),
-        deps.repo.permissoesEfetivas(usuario.id),
-      ]);
-      // Sem recorte, o token carrega a autoridade inteira do usuário e o escopo padrão.
-      const concedida: AutoridadeConcedida = opcoes?.restringirAutoridade?.(permissions) ?? {
-        permissoes: permissions,
-        escopo: scope,
-      };
-      const emitido = await deps.tokenService.emitir(
-        {
-          sub: usuario.id,
-          roles,
-          permissions: [...concedida.permissoes],
-          scope: concedida.escopo,
-          // `sub_type` só aparece quando a emissão passou por um cliente: um consumidor que
-          // recebe token de duas origens precisa saber que ali há uma pessoa por trás. O
-          // token do login por senha continua sem a claim.
-          ...(opcoes?.clientId === undefined
-            ? {}
-            : { clientId: opcoes.clientId, subType: 'user' as const }),
-        },
-        opcoes?.ttlSegundos === undefined ? undefined : { ttlSegundos: opcoes.ttlSegundos },
-      );
-      const refreshToken = await deps.refreshToken.emitir(
-        usuario.id,
-        opcoes?.clientId === undefined
-          ? undefined
-          : { clientId: opcoes.clientId, escopo: concedida.escopo },
-      );
+      // Senha correta e conta ativa: daqui em diante o login ou termina, ou para no
+      // segundo fator. A porta ausente é o caminho de quem não tem MFA instalado.
+      const desafio = (await deps.mfa?.desafiar(usuario.id)) ?? null;
+      if (desafio !== null) {
+        return {
+          mfaRequerido: true,
+          mfaToken: desafio.token,
+          expiraEmSegundos: desafio.expiraEmSegundos,
+        };
+      }
+
+      const par = await emitirPar(usuario.id, opcoes, null);
 
       medidor.contarSucesso();
       await auditoria.registrar({
@@ -184,11 +235,40 @@ export function criarAuthService(deps: DependenciasDoAuthService): AuthService {
         actor: { id: usuario.id, type: 'user' },
         outcome: 'success',
       });
-      return {
-        accessToken: emitido.token,
-        refreshToken,
-        expiraEmSegundos: emitido.ttlSegundos,
-      };
+      return par;
+    },
+
+    async concluirDesafio(mfaToken, resposta, opcoes): Promise<ParDeTokens> {
+      const resolvido = (await deps.mfa?.resolver(mfaToken, resposta)) ?? null;
+      if (resolvido === null) {
+        // Desafio inexistente, expirado, esgotado ou resposta errada: uma resposta só.
+        medidor.contarFalha('mfa');
+        await auditoria.registrar({
+          type: 'iam.mfa.failed',
+          actor: { id: null, type: 'user' },
+          outcome: 'failure',
+          reason: 'invalid_credentials',
+        });
+        throw new ErroDeAutenticacao('desafio-mfa-invalido');
+      }
+
+      // O usuário é relido aqui: entre a senha e o segundo fator dá tempo de a conta ser
+      // bloqueada, e o desafio não pode virar um passe livre por cinco minutos.
+      const usuario = await deps.repo.buscarPorId(resolvido.userId);
+      if (usuario === null || usuario.status !== 'active') {
+        medidor.contarFalha('bloqueado');
+        throw new ErroDeAutenticacao('credencial-invalida');
+      }
+
+      const par = await emitirPar(resolvido.userId, opcoes, resolvido.metodo);
+
+      medidor.contarSucesso();
+      await auditoria.registrar({
+        type: resolvido.metodo === 'recovery' ? 'iam.mfa.recovery_used' : 'iam.mfa.verified',
+        actor: { id: resolvido.userId, type: 'user' },
+        outcome: 'success',
+      });
+      return par;
     },
 
     async logout(dados: DadosDeLogout): Promise<void> {
