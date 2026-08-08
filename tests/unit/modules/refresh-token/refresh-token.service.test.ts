@@ -56,7 +56,7 @@ function montar(): Fakes {
     () => Promise.resolve(docAtivo()),
   );
   const revogarFamilia = vi.fn<(familyId: string) => Promise<void>>(() => Promise.resolve());
-  const revogarDoUsuario = vi.fn<(userId: string) => Promise<void>>(() => Promise.resolve());
+  const revogarDoUsuario = vi.fn<(userId: string) => Promise<number>>(() => Promise.resolve(0));
   const buscarPorId = vi.fn<(id: string) => Promise<UsuarioLido>>(() =>
     Promise.resolve({ id: 'u1', email: 'a@iam.local', status: 'active' }),
   );
@@ -73,7 +73,16 @@ function montar(): Fakes {
   };
 
   const service = criarRefreshTokenService({
-    repo: { registrar, buscarPorHash, rotacionarAtomico, revogarFamilia, revogarDoUsuario },
+    repo: {
+      registrar,
+      buscarPorHash,
+      rotacionarAtomico,
+      revogarFamilia,
+      revogarDoUsuario,
+      familiasAtivasDoUsuario: () => Promise.resolve([]),
+      contarFamiliasAtivas: () => Promise.resolve(0),
+      revogarFamiliaDoUsuario: () => Promise.resolve(true),
+    },
     usuarios: { buscarPorId, papeisDoUsuario, permissoesEfetivas },
     tokenService: { emitir },
     ttlIdleMs: 60_000,

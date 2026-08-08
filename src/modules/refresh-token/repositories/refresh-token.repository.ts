@@ -48,11 +48,22 @@ export interface RepositorioDeRefreshToken {
   /** Revoga todos os tokens ainda `active` de uma família (logout, reuso, bloqueio). */
   revogarFamilia(familyId: string): Promise<void>;
   /**
+   * As famílias ainda vivas de um usuário — uma por sessão aberta.
+   *
+   * Família é o que sobrevive à rotação: o token muda a cada refresh, a família não. Por
+   * isso ela é o identificador estável de "sessão" para quem administra de fora.
+   */
+  familiasAtivasDoUsuario(userId: string): Promise<SessaoAtiva[]>;
+  /** Quantas famílias ainda vivas existem no total. */
+  contarFamiliasAtivas(): Promise<number>;
+  /** Revoga uma família **do usuário informado**; `false` se ela não é dele ou não existe. */
+  revogarFamiliaDoUsuario(userId: string, familyId: string): Promise<boolean>;
+  /**
    * Revoga todos os tokens ainda `active` do usuário, em todas as famílias — o que
    * bloqueio, remoção e troca de senha precisam: derrubar as sessões que existirem, sem
    * que quem chama saiba quantas famílias o usuário tem abertas.
    */
-  revogarDoUsuario(userId: string): Promise<void>;
+  revogarDoUsuario(userId: string): Promise<number>;
 }
 
 interface LinhaMongo {
@@ -65,6 +76,13 @@ interface LinhaMongo {
   readonly idle_expires_at: Date;
   readonly absolute_expires_at: Date;
   readonly expires_at: Date;
+}
+
+/** Uma sessão aberta, na forma que quem administra precisa ver. */
+export interface SessaoAtiva {
+  readonly familyId: string;
+  readonly criadaEm: Date;
+  readonly expiraEm: Date;
 }
 
 function paraDominio(linha: LinhaMongo): RefreshPersistido {
@@ -110,6 +128,44 @@ export function criarRepositorioDeRefreshToken(banco: Db): RepositorioDeRefreshT
       return anterior === null ? null : paraDominio(anterior);
     },
 
+    async familiasAtivasDoUsuario(userId: string): Promise<SessaoAtiva[]> {
+      // Uma família tem vários tokens ao longo das rotações; a sessão começa no primeiro e
+      // vale até o teto absoluto, que a rotação nunca estende — daí o `$min` e o `$max`.
+      const grupos = await colecao
+        .aggregate<{ _id: string; criadaEm: Date; expiraEm: Date }>([
+          { $match: { user_id: userId, status: 'active' } },
+          {
+            $group: {
+              _id: '$family_id',
+              criadaEm: { $min: '$created_at' },
+              expiraEm: { $max: '$absolute_expires_at' },
+            },
+          },
+          { $sort: { criadaEm: -1 } },
+        ])
+        .toArray();
+      return grupos.map((grupo) => ({
+        familyId: grupo._id,
+        criadaEm: grupo.criadaEm,
+        expiraEm: grupo.expiraEm,
+      }));
+    },
+
+    async contarFamiliasAtivas(): Promise<number> {
+      const distintas = await colecao.distinct('family_id', { status: 'active' });
+      return distintas.length;
+    },
+
+    async revogarFamiliaDoUsuario(userId: string, familyId: string): Promise<boolean> {
+      // O `user_id` entra no filtro, não numa checagem antes: sem ele, um id de família de
+      // outra pessoa derrubaria a sessão dela pela rota de um alvo qualquer.
+      const { modifiedCount } = await colecao.updateMany(
+        { family_id: familyId, user_id: userId, status: 'active' },
+        { $set: { status: 'revoked' } },
+      );
+      return modifiedCount > 0;
+    },
+
     async revogarFamilia(familyId: string): Promise<void> {
       await colecao.updateMany(
         { family_id: familyId, status: 'active' },
@@ -117,11 +173,14 @@ export function criarRepositorioDeRefreshToken(banco: Db): RepositorioDeRefreshT
       );
     },
 
-    async revogarDoUsuario(userId: string): Promise<void> {
-      await colecao.updateMany(
+    async revogarDoUsuario(userId: string): Promise<number> {
+      // Devolve quantos tokens caíram: quem revoga de fora não tem outra confirmação de que
+      // a ação surtiu efeito, e "não havia nada aberto" precisa ser distinguível de "falhou".
+      const { modifiedCount } = await colecao.updateMany(
         { user_id: userId, status: 'active' },
         { $set: { status: 'revoked' } },
       );
+      return modifiedCount;
     },
   };
 }

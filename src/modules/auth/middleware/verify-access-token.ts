@@ -14,6 +14,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { jwtVerify } from 'jose';
 import { montarProblema } from '../../../shared/errors/problem-json.js';
 import { definirAtorDaRequisicao } from '../../../shared/context/request-context.js';
+import { marcarAutenticacao } from '../../../shared/middleware/marcadores.js';
 import type { UsuarioAutenticado } from '../types/auth.types.js';
 import type { JwksService } from '../../jwks/index.js';
 import type { RepositorioDeDenylist } from '../repositories/token-denylist.repository.js';
@@ -61,7 +62,7 @@ export type VerificadorDeAccessToken = (
 export function criarVerificadorDeAccessToken(
   deps: DependenciasDeVerificacao,
 ): VerificadorDeAccessToken {
-  return async function verificar(requisicao, resposta): Promise<void> {
+  return marcarAutenticacao(async function verificar(requisicao, resposta): Promise<void> {
     const token = extrairBearer(requisicao.headers.authorization);
     if (token === null) {
       await recusar(resposta, 'invalid-token');
@@ -117,7 +118,7 @@ export function criarVerificadorDeAccessToken(
     // ator das operações administrativas: o serviço que bloqueia um usuário conhece o alvo,
     // não quem mandou bloquear.
     definirAtorDaRequisicao(sub);
-  };
+  });
 }
 
 /** Id do usuário autenticado, ou `null` — cumpre a porta de autenticação do módulo de senha. */

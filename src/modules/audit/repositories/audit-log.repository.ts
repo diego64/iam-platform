@@ -203,6 +203,15 @@ export interface RepositorioDaTrilha {
     calcularHash: (seq: number, prevHash: string) => string,
   ): Promise<ResultadoDeAnexo>;
   buscarPorSeq(seq: number): Promise<EventoPersistido | null>;
+  /** Quantos eventos de um tipo ocorreram desde um instante — contador de painel. */
+  contarPorTipoDesde(tipo: string, desde: Date): Promise<number>;
+  /**
+   * Os eventos mais recentes em que o usuário aparece — como ator ou como alvo.
+   *
+   * As duas pontas importam: "o que essa pessoa fez" e "o que fizeram com ela" são a mesma
+   * pergunta quando se abre a ficha de alguém.
+   */
+  ultimosDoUsuario(userId: string, limite: number): Promise<EventoPersistido[]>;
   listar(filtro: FiltroDaTrilha): Promise<PaginaDaTrilha>;
   lerFaixa(de: number, ate: number): AsyncIterable<EventoPersistido>;
 }
@@ -273,6 +282,22 @@ export function criarRepositorioDaTrilha(banco: Db, opcoes: OpcoesDaTrilha): Rep
     async buscarPorSeq(seq: number): Promise<EventoPersistido | null> {
       const doc = await trilha.findOne({ seq }, { projection: { _id: 0 } });
       return doc === null ? null : paraEntidade(doc);
+    },
+
+    async contarPorTipoDesde(tipo: string, desde: Date): Promise<number> {
+      return trilha.countDocuments({ type: tipo, occurred_at: { $gte: desde } });
+    },
+
+    async ultimosDoUsuario(userId: string, limite: number): Promise<EventoPersistido[]> {
+      const docs = await trilha
+        .find(
+          { $or: [{ 'actor.id': userId }, { 'target.id': userId }] },
+          { projection: { _id: 0 } },
+        )
+        .sort({ seq: -1 })
+        .limit(limite)
+        .toArray();
+      return docs.map(paraEntidade);
     },
 
     async listar(filtro): Promise<PaginaDaTrilha> {

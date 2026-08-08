@@ -40,6 +40,8 @@ import { registrarRotasDeRbac } from './modules/rbac/index.js';
 import { registrarRotasDeAbac } from './modules/abac/index.js';
 import { registrarRotasDeClientes } from './modules/api-clients/index.js';
 import { registrarRotasDeAuditoria } from './modules/audit/index.js';
+import { registrarRotasDeAdmin } from './modules/admin/index.js';
+import { registrarExigenciaDeGuardAdmin } from './plugins/exigir-guard-admin.js';
 import { registrarContextoDeRequisicao } from './plugins/request-context.js';
 import { registrarRotasDeChaves } from './modules/jwks/index.js';
 
@@ -216,6 +218,10 @@ export async function construirApp(
   // de onde veio a chamada. Registrado depois, as rotas já definidas não passariam por ele.
   registrarContextoDeRequisicao(app);
 
+  // Antes das rotas, e não como teste: registrar uma rota administrativa sem quem a
+  // autentique e quem a autorize passa a impedir o processo de subir.
+  registrarExigenciaDeGuardAdmin(app);
+
   const inventarioDeRotas: RotaRegistrada[] = [];
   app.decorate('inventarioDeRotas', inventarioDeRotas);
   app.addHook('onRoute', (opcoes) => {
@@ -334,6 +340,7 @@ export async function construirApp(
     registrarRotasDeAbac(app, modulos.abac);
     registrarRotasDeClientes(app, modulos.clientes);
     registrarRotasDeAuditoria(app, modulos.auditoria);
+    registrarRotasDeAdmin(app, modulos.admin);
 
     // Ausente quando não há segredo mestre: sem ele o serviço de rotação não existe, e as
     // rotas administrativas de chave não teriam o que servir.

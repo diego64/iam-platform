@@ -33,6 +33,11 @@ tags:
       Clientes de API — a identidade de uma aplicação, não de uma pessoa. O escopo concedido
       é o nome de uma permissão do catálogo do RBAC, então o mesmo guard autoriza token de
       usuário e token de cliente.
+  - name: admin
+    description: >-
+      Painel administrativo. Agrega, numa chamada, o que hoje exigiria cinco, e é o único
+      lugar em que um administrador encerra a sessão de outra pessoa. Não reimplementa CRUD:
+      criar usuário, papel, cliente ou chave continua nas rotas dos módulos donos.
   - name: audit
     description: >-
       Trilha de auditoria append-only. Encadeada por hash e ancorada no PostgreSQL: a leitura
@@ -582,6 +587,131 @@ components:
             seq: { type: integer }
             hash: { type: string }
             confere: { type: boolean }
+    AdminSession:
+      type: object
+      additionalProperties: false
+      required: [session_id, created_at, expires_at]
+      properties:
+        session_id:
+          type: string
+          description: 'Identificador da sessão: a família do refresh token, estável entre rotações'
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        ip: { type: string }
+        user_agent: { type: string }
+        last_seen_at: { type: string, format: date-time }
+    AdminOverview:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          apurado_em,
+          cache,
+          parcial,
+          usuarios,
+          sessoes_ativas,
+          logins_24h,
+          clientes_ativos,
+          chave_ativa,
+        ]
+      properties:
+        apurado_em:
+          type: string
+          format: date-time
+          description: Instante da apuração — o painel mostra a idade do dado, não tempo real
+        cache: { type: string, enum: [hit, miss] }
+        parcial:
+          type: boolean
+          description: Alguma fonte acessória estava fora; os campos dela vieram nulos
+        usuarios:
+          type: object
+          additionalProperties: false
+          required: [active, blocked, total]
+          properties:
+            active: { type: integer }
+            blocked: { type: integer }
+            total: { type: integer }
+        sessoes_ativas: { type: integer, nullable: true }
+        logins_24h:
+          type: object
+          nullable: true
+          additionalProperties: false
+          required: [sucesso, falha]
+          properties:
+            sucesso: { type: integer }
+            falha: { type: integer }
+        clientes_ativos: { type: integer, nullable: true }
+        chave_ativa:
+          type: object
+          nullable: true
+          additionalProperties: false
+          required: [kid, idade_dias]
+          properties:
+            kid: { type: string }
+            idade_dias: { type: integer }
+    AdminUserView:
+      type: object
+      additionalProperties: false
+      required: [parcial, perfil, papeis, permissoes, senha, sessoes, eventos]
+      properties:
+        parcial: { type: boolean }
+        perfil:
+          type: object
+          additionalProperties: false
+          required: [id, email, status, created_at, updated_at]
+          properties:
+            id: { type: string, format: uuid }
+            email: { type: string }
+            status: { type: string, enum: [active, blocked] }
+            created_at: { type: string, format: date-time }
+            updated_at: { type: string, format: date-time }
+        papeis:
+          type: array
+          nullable: true
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, name, is_system]
+            properties:
+              id: { type: string, format: uuid }
+              name: { type: string }
+              is_system: { type: boolean }
+        permissoes:
+          type: array
+          nullable: true
+          items: { type: string }
+        senha:
+          type: object
+          nullable: true
+          additionalProperties: false
+          required: [alterada_em]
+          properties:
+            alterada_em: { type: string, format: date-time, nullable: true }
+        sessoes:
+          type: array
+          nullable: true
+          items: { $ref: '#/components/schemas/AdminSession' }
+        eventos:
+          type: array
+          nullable: true
+          items:
+            type: object
+            additionalProperties: false
+            required: [seq, type, occurred_at, outcome]
+            properties:
+              seq: { type: integer }
+              type: { type: string }
+              occurred_at: { type: string, format: date-time }
+              outcome: { type: string }
+    AdminSessionList:
+      type: object
+      additionalProperties: false
+      required: [itens, total]
+      properties:
+        itens:
+          type: array
+          items: { $ref: '#/components/schemas/AdminSession' }
+        total: { type: integer }
   securitySchemes:
     BearerAuth:
       type: http
@@ -615,6 +745,11 @@ components:
           schema: { $ref: '#/components/schemas/Problem' }
     ProblemMetodoNaoPermitido:
       description: Método recusado por contrato
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    ProblemFonteIndisponivel:
+      description: Fonte essencial indisponível
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
@@ -2104,3 +2239,115 @@ paths:
         '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
         '403': { $ref: '#/components/responses/ProblemSemPermissao' }
         '503': { $ref: '#/components/responses/ProblemTrilhaIndisponivel' }
+  /admin/overview:
+    get:
+      tags: [admin]
+      summary: Números da tela inicial do painel
+      description: >-
+        Exige `admin:read`. Reúne cinco fontes numa chamada e devolve o instante da apuração:
+        os números vêm de um cache de janela curta, e o painel mostra a idade do dado em vez
+        de fingir tempo real. Fonte acessória fora vira campo nulo com `parcial: true` — só a
+        contagem de usuários é essencial, e a ausência dela é 503.
+      operationId: adminOverview
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: Visão agregada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminOverview' }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+        '503': { $ref: '#/components/responses/ProblemFonteIndisponivel' }
+  /admin/users/{id}:
+    get:
+      tags: [admin]
+      summary: Ficha completa de um usuário
+      description: >-
+        Exige `admin:read`. Perfil, papéis, permissões efetivas, estado da senha, sessões
+        ativas e os últimos eventos de auditoria numa chamada. A resposta é montada campo a
+        campo: hash de senha, hash de token e segredo de cliente não têm caminho até aqui.
+      operationId: adminUserView
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Ficha do usuário
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminUserView' }
+        '400': { $ref: '#/components/responses/ProblemValidacao' }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+        '404': { $ref: '#/components/responses/ProblemNaoEncontrado' }
+        '503': { $ref: '#/components/responses/ProblemFonteIndisponivel' }
+  /admin/users/{id}/sessions:
+    get:
+      tags: [admin]
+      summary: Sessões ativas de um usuário
+      description: >-
+        Exige `sessions:read`. Sessão é a família do refresh token — o token muda a cada
+        rotação, a família não. Não há marca de "sessão atual": a sessão corrente é a do
+        administrador, não a do usuário listado.
+      operationId: adminListUserSessions
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Sessões ativas
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminSessionList' }
+        '400': { $ref: '#/components/responses/ProblemValidacao' }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+        '404': { $ref: '#/components/responses/ProblemNaoEncontrado' }
+    delete:
+      tags: [admin]
+      summary: Encerra todas as sessões de um usuário
+      description: >-
+        Exige `sessions:revoke`. Devolve quantas caíram — é a única confirmação de efeito que
+        o administrador tem. Apontar para si mesmo responde 409: encerrar a própria sessão se
+        faz pelas rotas de sessão do usuário autenticado.
+      operationId: adminRevokeUserSessions
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Sessões encerradas
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [revogadas]
+                properties:
+                  revogadas: { type: integer }
+        '400': { $ref: '#/components/responses/ProblemValidacao' }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+        '404': { $ref: '#/components/responses/ProblemNaoEncontrado' }
+        '409': { $ref: '#/components/responses/ProblemConflito' }
+  /admin/users/{id}/sessions/{sessionId}:
+    delete:
+      tags: [admin]
+      summary: Encerra uma sessão de um usuário
+      description: >-
+        Exige `sessions:revoke`. Idempotente por intenção: a sessão que não existe e a que
+        pertence a outra pessoa respondem igual, para a resposta não contar de quem é a
+        sessão que o administrador não pode tocar.
+      operationId: adminRevokeUserSession
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+        - { in: path, name: sessionId, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: Sessão encerrada }
+        '400': { $ref: '#/components/responses/ProblemValidacao' }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+        '404': { $ref: '#/components/responses/ProblemNaoEncontrado' }
+        '409': { $ref: '#/components/responses/ProblemConflito' }
