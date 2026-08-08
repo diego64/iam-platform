@@ -263,6 +263,15 @@ export const esquemaEnv = z.object({
     .max(24 * 60 * 60 * 1000)
     .default(5 * 60 * 1000),
 
+  // Onde vive o contador de rate limit. `mongo` compartilha a contagem entre as réplicas;
+  // `memory` volta ao contador por processo — suficiente em desenvolvimento e no teste, e
+  // enganoso em produção, onde o teto efetivo viraria o configurado vezes o número de
+  // instâncias.
+  RATE_LIMIT_STORE: z.enum(['mongo', 'memory']).default('mongo'),
+  // Acima disso, a consulta ao contador é abandonada e a requisição segue. Sem teto, um
+  // Mongo lento não derruba o login — segura, que na prática dá no mesmo.
+  RATE_LIMIT_STORE_TIMEOUT_MS: z.coerce.number().int().min(10).max(5_000).default(200),
+
   // Rate limit do login por IP. Teto apertado: login é alvo clássico de brute force.
   RATE_LIMIT_LOGIN_MAX: z.coerce.number().int().min(1).default(5),
   RATE_LIMIT_LOGIN_WINDOW_MS: z.coerce

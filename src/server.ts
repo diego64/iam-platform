@@ -12,7 +12,12 @@
 // a telemetria simplesmente fica vazia, e isso só é descoberto durante uma investigação
 // em que o trace já era necessário.
 import { telemetria } from './telemetry/index.js';
-import { carregarEnv, ErroDeConfiguracao, reportarErroDeConfiguracao } from './config/env.js';
+import {
+  carregarEnv,
+  ErroDeConfiguracao,
+  reportarErroDeConfiguracao,
+  type Env,
+} from './config/env.js';
 import { criarLogger } from './shared/logger/index.js';
 import { criarPoolPostgres, verificarPostgres } from './database/postgres/connection.js';
 import { conectarMongo } from './database/mongodb/connection.js';
@@ -28,12 +33,24 @@ import {
 import { criarEncerrador } from './bootstrap/shutdown.js';
 import { construirModulos } from './bootstrap/composicao.js';
 import { construirApp } from './app.js';
+import { criarContadorEmMemoria } from './shared/rate-limit/memory-store.js';
+import { criarContadorNoMongo } from './shared/rate-limit/mongo-store.js';
+import { criarMedidorDeRateLimit } from './shared/rate-limit/rate-limit.metrics.js';
 import { obterInstrumentos } from './telemetry/metricas.js';
 import { criarServicoDeProntidao } from './modules/health/services/prontidao.service.js';
 import {
   criarVerificadorMongo,
   criarVerificadorPostgres,
 } from './modules/health/services/verificadores.js';
+
+/**
+ * O pepper das chaves de rate limit é o mesmo da trilha: ele precisa ser estável entre
+ * réplicas e entre reinícios, senão a contagem de uma janela se perde no meio dela.
+ */
+function exigirPepperDeRateLimit(env: Env): string {
+  if (env.AUDIT_HINT_PEPPER !== undefined) return env.AUDIT_HINT_PEPPER;
+  throw new Error('AUDIT_HINT_PEPPER ausente: o contador de rate limit não sobe sem ele');
+}
 
 async function iniciar(): Promise<void> {
   // Logger de boot: antes da validação não existe LOG_LEVEL confiável.
@@ -151,7 +168,37 @@ async function iniciar(): Promise<void> {
         });
   agendadorDeRotacao?.iniciar();
 
-  const app = await construirApp(env, { prontidao, telemetria, jwks, modulos });
+  // Contador de rate limit compartilhado. Com `memory`, cada réplica conta por conta
+  // própria — útil em desenvolvimento, enganoso em produção.
+  const medidorDeRateLimit = medidorDeJwks === undefined ? undefined : criarMedidorDeRateLimit();
+  const contadorDeRateLimit =
+    env.RATE_LIMIT_STORE === 'memory'
+      ? criarContadorEmMemoria()
+      : criarContadorNoMongo({
+          banco,
+          timeoutMs: env.RATE_LIMIT_STORE_TIMEOUT_MS,
+          aoFalhar: () => {
+            medidorDeRateLimit?.contarErroDoContador();
+          },
+        });
+
+  const app = await construirApp(env, {
+    prontidao,
+    telemetria,
+    jwks,
+    modulos,
+    rateLimit: {
+      contador: contadorDeRateLimit,
+      pepper: exigirPepperDeRateLimit(env),
+      ...(medidorDeRateLimit === undefined
+        ? {}
+        : {
+            aoFalhar: (): void => {
+              medidorDeRateLimit.contarErroDoContador();
+            },
+          }),
+    },
+  });
 
   // Inventário do que esta instância serve. Existe para a pergunta que só aparece durante
   // um incidente — "esta réplica tem a rota nova?" — ser respondida pelo log da própria
