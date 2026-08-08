@@ -33,6 +33,7 @@ import type { VerificadorDeAccessToken } from './modules/auth/index.js';
 import { registrarRotasDeAuth } from './modules/auth/index.js';
 import { registrarRotasDeRefresh } from './modules/refresh-token/index.js';
 import { registrarRotasDeMetadados, registrarRotasDeOAuth } from './modules/oauth/index.js';
+import { registrarRotasDeMfa } from './modules/mfa/index.js';
 import { registrarRotasDeSenha } from './modules/password/index.js';
 import type { DependenciasDoController as DependenciasDeSenha } from './modules/password/index.js';
 import { registrarRotasDeUsuario } from './modules/users/index.js';
@@ -344,6 +345,12 @@ export async function construirApp(
     // rotas administrativas de chave não teriam o que servir.
     if (modulos.chaves !== undefined) {
       registrarRotasDeChaves(app, modulos.chaves);
+    }
+
+    // Mesma regra: sem segredo mestre não há como cifrar o segredo TOTP em repouso, e as
+    // rotas de MFA simplesmente não existem.
+    if (modulos.mfa !== undefined) {
+      await registrarRotasDeMfa(app, modulos.mfa);
     }
   }
 

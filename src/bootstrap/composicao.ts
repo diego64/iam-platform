@@ -72,6 +72,15 @@ import {
 } from '../modules/api-clients/index.js';
 import type { DependenciasDasRotasDeClientes } from '../modules/api-clients/routes/api-client.routes.js';
 import {
+  criarMedidorDeMfa,
+  criarMfaService,
+  criarRepositorioDeCodigosDeRecuperacao,
+  criarRepositorioDeDesafioDeMfa,
+  criarRepositorioDeFatorDeMfa,
+  criarServicoDeDesafioDeMfa,
+  type DependenciasDasRotasDeMfa,
+} from '../modules/mfa/index.js';
+import {
   criarMedidorDeOAuth,
   criarMetadataService,
   criarOAuthService,
@@ -132,6 +141,12 @@ export interface ModulosDaAplicacao {
   readonly auth: DependenciasDasRotasDeAuth;
   readonly refresh: DependenciasDasRotasDeRefresh;
   readonly oauth: DependenciasDasRotasDeOAuth;
+  /**
+   * Ausente sem `MASTER_KEY`: sem ela não há como cifrar o segredo TOTP em repouso, e um
+   * IdP que guardasse esse segredo em claro por falta de variável de ambiente seria pior
+   * que um IdP sem segundo fator. Mesma regra que já vale para a rotação de chaves.
+   */
+  readonly mfa?: DependenciasDasRotasDeMfa;
   readonly metadadosDeOAuth: DependenciasDasRotasDeMetadados;
   readonly senha: DependenciasDeSenha;
   readonly users: DependenciasDeUsuarios;
@@ -245,6 +260,26 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
     revogarTodas: (userId) => repoRefresh.revogarDoUsuario(userId),
   };
 
+  // O segundo fator entra no login por porta; sem `MASTER_KEY` a porta não existe e o
+  // login volta a ser de um passo — que é o comportamento de antes da SPEC 010.
+  const medidorDeMfa = metricas ? criarMedidorDeMfa() : undefined;
+  const repoFatores = criarRepositorioDeFatorDeMfa(pool);
+  const repoCodigos = criarRepositorioDeCodigosDeRecuperacao(pool);
+  const repoDesafios = criarRepositorioDeDesafioDeMfa(banco);
+  const portaDeMfa =
+    env.MASTER_KEY === undefined
+      ? undefined
+      : criarServicoDeDesafioDeMfa({
+          fatores: repoFatores,
+          codigos: repoCodigos,
+          desafios: repoDesafios,
+          masterKey: env.MASTER_KEY,
+          ttlMs: env.MFA_CHALLENGE_TTL_MS,
+          maxTentativas: env.MFA_MAX_ATTEMPTS,
+          janela: env.MFA_TOTP_WINDOW,
+          ...(medidorDeMfa ? { medidor: medidorDeMfa } : {}),
+        });
+
   const authService = criarAuthService({
     repo: repoAuth,
     servicoDeSenha,
@@ -252,6 +287,7 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
     refreshToken: refreshTokenService,
     denylist,
     auditoria,
+    ...(portaDeMfa ? { mfa: portaDeMfa } : {}),
     ...(metricas ? { medidor: criarMedidorDeAuth() } : {}),
   });
 
@@ -333,6 +369,30 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
     auth: { authService, verificarAccessToken },
     refresh: { refreshTokenService },
     oauth: { oauthService },
+    ...(env.MASTER_KEY === undefined
+      ? {}
+      : {
+          mfa: {
+            mfaService: criarMfaService({
+              fatores: repoFatores,
+              codigos: repoCodigos,
+              desafios: repoDesafios,
+              usuarios: repoUsuarios,
+              servicoDeSenha,
+              masterKey: env.MASTER_KEY,
+              emissor: env.MFA_ISSUER ?? new URL(env.JWT_ISSUER).host,
+              quantidadeDeCodigos: env.MFA_RECOVERY_CODE_COUNT,
+              janela: env.MFA_TOTP_WINDOW,
+              sessoes,
+              auditoria,
+              ...(medidorDeMfa ? { medidor: medidorDeMfa } : {}),
+            }),
+            authService,
+            autenticar: idAutenticado,
+            verificarAccessToken,
+            guards,
+          },
+        }),
     metadadosDeOAuth: { metadataService },
     senha: { passwordService, autenticar: idAutenticado },
     users: {
