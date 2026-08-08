@@ -15,6 +15,8 @@ import type {
   OpcoesDeLogin,
 } from '../../../../src/modules/auth/services/auth.service.js';
 import type { ParDeTokens } from '../../../../src/modules/auth/types/auth.types.js';
+import type { OpcoesDeRotacao } from '../../../../src/modules/refresh-token/services/refresh-token.service.js';
+import { ErroDeRefreshInvalido } from '../../../../src/modules/refresh-token/errors/refresh-token-error.js';
 import { ErroDeAutenticacao } from '../../../../src/modules/auth/errors/auth-error.js';
 
 const CREDENCIAL = { clientId: 'cli_abc', secret: 's3gr3d0' };
@@ -35,11 +37,16 @@ interface Fakes {
   autenticar: ReturnType<typeof vi.fn>;
   emitir: ReturnType<typeof vi.fn>;
   login: ReturnType<typeof vi.fn>;
+  rotacionar: ReturnType<typeof vi.fn>;
 }
 
 function montar(
   cliente: ClienteAutenticado | null = clienteFake(),
-  opcoes: { passwordGrantHabilitado?: boolean; permissoesDoUsuario?: string[] } = {},
+  opcoes: {
+    passwordGrantHabilitado?: boolean;
+    permissoesDoUsuario?: string[];
+    escopoOriginal?: string | null;
+  } = {},
 ): Fakes {
   const autenticar = vi.fn(() => Promise.resolve(cliente));
   const emitir = vi.fn<() => Promise<TokenEmitido>>(() =>
@@ -58,16 +65,32 @@ function montar(
     },
   );
 
+  const rotacionar = vi.fn(
+    (_token: string, opcoesDeRotacao?: OpcoesDeRotacao): Promise<ParDeTokens> => {
+      opcoesDeRotacao?.restringirAutoridade?.({
+        permissoesDoUsuario: opcoes.permissoesDoUsuario ?? ['*'],
+        escopoOriginal: opcoes.escopoOriginal ?? null,
+      });
+      return Promise.resolve({
+        accessToken: 'jwt-renovado',
+        refreshToken: 'refresh-sucessor',
+        expiraEmSegundos: 900,
+      });
+    },
+  );
+
   return {
     service: criarOAuthService({
       clientAuth: { autenticar },
       tokenService: { emitir },
       authService: { login },
+      refreshTokenService: { rotacionar },
       passwordGrantHabilitado: opcoes.passwordGrantHabilitado ?? true,
     }),
     autenticar,
     emitir,
     login,
+    rotacionar,
   };
 }
 
@@ -223,5 +246,69 @@ describe('grant password', () => {
     await expect(
       service.emitir(pedidoDeSenha({ escoposSolicitados: ['users:delete'] })),
     ).rejects.toMatchObject({ codigo: 'invalid_scope' });
+  });
+});
+
+describe('grant refresh_token', () => {
+  const CLIENTE_COM_REFRESH = clienteFake({
+    grantTypes: ['refresh_token'],
+    escopos: ['orders:read', 'orders:write'],
+  });
+
+  function pedidoDeRefresh(sobrescritas: Partial<PedidoDeToken> = {}): PedidoDeToken {
+    return pedido({ grantType: 'refresh_token', refreshToken: 'opaco-88', ...sobrescritas });
+  }
+
+  it('rotaciona e devolve o sucessor', async () => {
+    const { service, rotacionar } = montar(CLIENTE_COM_REFRESH, {
+      escopoOriginal: 'orders:read',
+    });
+
+    const concedido = await service.emitir(pedidoDeRefresh());
+
+    expect(concedido).toEqual({
+      accessToken: 'jwt-renovado',
+      tokenType: 'Bearer',
+      expiresIn: 900,
+      scope: 'orders:read',
+      refreshToken: 'refresh-sucessor',
+    });
+    expect(rotacionar).toHaveBeenCalledWith(
+      'opaco-88',
+      expect.objectContaining({ clientIdEsperado: 'cli_abc' }),
+    );
+  });
+
+  it('a renovação não amplia o escopo concedido na emissão', async () => {
+    const { service } = montar(CLIENTE_COM_REFRESH, { escopoOriginal: 'orders:read' });
+
+    await expect(
+      service.emitir(pedidoDeRefresh({ escoposSolicitados: ['orders:write'] })),
+    ).rejects.toMatchObject({ codigo: 'invalid_scope' });
+  });
+
+  it('sem escopo gravado, o teto volta a ser o do cliente', async () => {
+    const { service } = montar(CLIENTE_COM_REFRESH, { escopoOriginal: null });
+
+    const concedido = await service.emitir(pedidoDeRefresh());
+
+    expect(concedido.scope).toBe('orders:read orders:write');
+  });
+
+  it('qualquer falha da rotação vira invalid_grant', async () => {
+    const { service, rotacionar } = montar(CLIENTE_COM_REFRESH);
+    rotacionar.mockRejectedValueOnce(new ErroDeRefreshInvalido('cliente_divergente'));
+
+    await expect(service.emitir(pedidoDeRefresh())).rejects.toMatchObject({
+      codigo: 'invalid_grant',
+    });
+  });
+
+  it('refresh_token ausente vira invalid_request', async () => {
+    const { service } = montar(CLIENTE_COM_REFRESH);
+
+    await expect(
+      service.emitir(pedidoDeRefresh({ refreshToken: undefined })),
+    ).rejects.toMatchObject({ codigo: 'invalid_request' });
   });
 });

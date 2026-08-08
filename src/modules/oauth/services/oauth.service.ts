@@ -19,6 +19,7 @@ import type { ClientAuthService } from '../../api-clients/services/client-auth.s
 import type { ClienteAutenticado, TipoDeGrant } from '../../api-clients/types/api-client.types.js';
 import type { TokenService } from '../../auth/services/token.service.js';
 import type { AuthService } from '../../auth/services/auth.service.js';
+import type { RefreshTokenService } from '../../refresh-token/services/refresh-token.service.js';
 
 const GRANTS_CONHECIDOS: readonly TipoDeGrant[] = [
   'client_credentials',
@@ -33,6 +34,8 @@ export interface PedidoDeToken {
   /** `password` grant: credencial do dono do recurso. */
   readonly username?: string | undefined;
   readonly password?: string | undefined;
+  /** `refresh_token` grant: o token opaco a ser rotacionado. */
+  readonly refreshToken?: string | undefined;
 }
 
 /** A resposta da RFC 6749 §5.1, no vocabulário do domínio. */
@@ -48,6 +51,7 @@ export interface DependenciasDoOAuthService {
   readonly clientAuth: ClientAuthService;
   readonly tokenService: TokenService;
   readonly authService: Pick<AuthService, 'login'>;
+  readonly refreshTokenService: Pick<RefreshTokenService, 'rotacionar'>;
   /**
    * Interruptor global do `password` grant. Desligado, o grant deixa de existir para todos
    * os clientes — a saída de incidente que não depende de editar cliente por cliente.
@@ -182,6 +186,61 @@ export function criarOAuthService(deps: DependenciasDoOAuthService): OAuthServic
     }
   }
 
+  /**
+   * `refresh_token`: delega a rotação, que traz consigo o uso único, a detecção de reuso e o
+   * vínculo com o cliente. O recorte reaplica o teto da emissão original — a RFC 6749 §6
+   * proíbe a renovação ampliar o que foi concedido.
+   */
+  async function porRefresh(
+    cliente: ClienteAutenticado,
+    pedido: PedidoDeToken,
+  ): Promise<TokenConcedido> {
+    if (pedido.refreshToken === undefined) {
+      throw new ErroDeOAuth('invalid_request', 'Informe refresh_token.');
+    }
+
+    let escopo = '';
+
+    try {
+      const par = await deps.refreshTokenService.rotacionar(pedido.refreshToken, {
+        clientIdEsperado: cliente.clientId,
+        restringirAutoridade: ({ permissoesDoUsuario, escopoOriginal }) => {
+          // Sem escopo gravado (família anterior a esta SPEC), o teto volta a ser o do
+          // cliente — que é o mesmo limite que valia quando o token foi emitido.
+          const teto =
+            escopoOriginal === null
+              ? cliente.escopos
+              : escopoOriginal.split(' ').filter((parte) => parte.length > 0);
+          const concedido = calcularEscopoConcedido({
+            solicitados: pedido.escoposSolicitados,
+            escoposDoCliente: teto,
+            autoridadeDoSujeito: permissoesDoUsuario,
+          });
+          escopo = formatarEscopo(concedido);
+          return { permissoes: concedido, escopo };
+        },
+        ...(cliente.accessTokenTtlSegundos === null
+          ? {}
+          : { ttlSegundos: cliente.accessTokenTtlSegundos }),
+      });
+
+      return {
+        accessToken: par.accessToken,
+        tokenType: 'Bearer',
+        expiresIn: par.expiraEmSegundos,
+        scope: escopo,
+        refreshToken: par.refreshToken,
+      };
+    } catch (erro) {
+      if (erro instanceof ErroDeOAuth) {
+        throw erro;
+      }
+      // Ausente, expirado, reusado, de outro cliente: tudo é `invalid_grant`. O motivo real
+      // fica na métrica e no log do módulo de refresh.
+      throw new ErroDeOAuth('invalid_grant');
+    }
+  }
+
   return {
     async emitir(pedido: PedidoDeToken): Promise<TokenConcedido> {
       const cliente = await autorizarCliente(pedido);
@@ -194,7 +253,7 @@ export function criarOAuthService(deps: DependenciasDoOAuthService): OAuthServic
         return porSenha(cliente, pedido);
       }
 
-      throw new ErroDeOAuth('unsupported_grant_type');
+      return porRefresh(cliente, pedido);
     },
   };
 }
