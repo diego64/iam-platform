@@ -162,7 +162,12 @@ export function criarAuthService(deps: DependenciasDoAuthService): AuthService {
           roles,
           permissions: [...concedida.permissoes],
           scope: concedida.escopo,
-          ...(opcoes?.clientId === undefined ? {} : { clientId: opcoes.clientId }),
+          // `sub_type` só aparece quando a emissão passou por um cliente: um consumidor que
+          // recebe token de duas origens precisa saber que ali há uma pessoa por trás. O
+          // token do login por senha continua sem a claim.
+          ...(opcoes?.clientId === undefined
+            ? {}
+            : { clientId: opcoes.clientId, subType: 'user' as const }),
         },
         opcoes?.ttlSegundos === undefined ? undefined : { ttlSegundos: opcoes.ttlSegundos },
       );
