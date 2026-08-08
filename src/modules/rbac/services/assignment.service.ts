@@ -12,6 +12,10 @@ import type {
   PapelResumo,
   RepositorioDeAssociacao,
 } from '../repositories/assignment.repository.js';
+import {
+  registradorNulo,
+  type RegistradorDeAuditoria,
+} from '../../audit/interfaces/audit-recorder.js';
 
 export interface PapeisDoUsuario {
   readonly userId: string;
@@ -20,6 +24,8 @@ export interface PapeisDoUsuario {
 
 export interface DependenciasDoAssignmentService {
   readonly associacoes: RepositorioDeAssociacao;
+  /** Trilha de auditoria. Ausente, o serviço roda sem registrar — o padrão nos testes. */
+  readonly auditoria?: RegistradorDeAuditoria;
 }
 
 export interface AssignmentService {
@@ -29,6 +35,8 @@ export interface AssignmentService {
 }
 
 export function criarAssignmentService(deps: DependenciasDoAssignmentService): AssignmentService {
+  const auditoria = deps.auditoria ?? registradorNulo();
+
   return {
     async listarPapeisDoUsuario(userId): Promise<PapeisDoUsuario> {
       if (!(await deps.associacoes.usuarioExiste(userId))) {
@@ -41,10 +49,28 @@ export function criarAssignmentService(deps: DependenciasDoAssignmentService): A
     async atribuirPapeis(userId, roleIds): Promise<void> {
       // O repositório valida usuário e papéis dentro da transação e faz rollback em falha.
       await deps.associacoes.atribuirPapeis(userId, roleIds);
+      // Concessão de privilégio é o evento que uma investigação procura primeiro: quem
+      // ganhou qual papel, e por ordem de quem.
+      await auditoria.registrar({
+        type: 'iam.role.assigned',
+        actor: { id: null, type: 'user' },
+        target: { id: userId, type: 'user' },
+        outcome: 'success',
+        reason: 'admin_action',
+        metadata: { role_ids: [...roleIds] },
+      });
     },
 
     async desatribuirPapel(userId, roleId): Promise<void> {
       await deps.associacoes.desatribuirPapel(userId, roleId);
+      await auditoria.registrar({
+        type: 'iam.role.revoked',
+        actor: { id: null, type: 'user' },
+        target: { id: userId, type: 'user' },
+        outcome: 'success',
+        reason: 'admin_action',
+        metadata: { role_ids: [roleId] },
+      });
     },
   };
 }

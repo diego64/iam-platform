@@ -1,5 +1,5 @@
 /**
- * Responsabilidade: garantir índices (unique + TTL) de refresh_tokens e token_denylist. Idempotente.
+ * Responsabilidade: garantir os índices (unique, TTL e de consulta) das coleções do Mongo. Idempotente.
  * Regras: rodado no boot e na migração; não cria índices duplicados; TTL expira sozinho.
  */
 import type { Db } from 'mongodb';
@@ -23,4 +23,21 @@ export async function garantirIndices(banco: Db): Promise<void> {
     { key: { expires_at: 1 }, expireAfterSeconds: 0 }, // TTL
     { key: { user_id: 1 } },
   ]);
+  // Trilha de auditoria. `seq` único é o que denuncia buraco na cadeia, e `event_id` único
+  // torna a reemissão do mesmo evento inofensiva. Os três índices de consulta cobrem os
+  // filtros da leitura (tipo, ator, alvo), sempre com recorte por tempo.
+  //
+  // Deliberadamente SEM índice TTL: a trilha não expira sozinha. Um TTL apagaria o começo
+  // da cadeia e a verificação de integridade passaria a acusar buraco todo dia; expurgo é
+  // operação de runbook, com corte anunciado por checkpoint.
+  await banco
+    .collection('audit_log')
+    .createIndexes([
+      { key: { seq: 1 }, unique: true },
+      { key: { event_id: 1 }, unique: true },
+      { key: { occurred_at: -1 } },
+      { key: { type: 1, occurred_at: -1 } },
+      { key: { 'actor.id': 1, occurred_at: -1 }, sparse: true },
+      { key: { 'target.id': 1, occurred_at: -1 }, sparse: true },
+    ]);
 }

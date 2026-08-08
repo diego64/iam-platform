@@ -13,6 +13,7 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { jwtVerify } from 'jose';
 import { montarProblema } from '../../../shared/errors/problem-json.js';
+import { definirAtorDaRequisicao } from '../../../shared/context/request-context.js';
 import type { UsuarioAutenticado } from '../types/auth.types.js';
 import type { JwksService } from '../../jwks/index.js';
 import type { RepositorioDeDenylist } from '../repositories/token-denylist.repository.js';
@@ -111,6 +112,11 @@ export function criarVerificadorDeAccessToken(
       scope: typeof scope === 'string' ? scope : '',
     };
     requisicao.tokenAtual = { jti, exp };
+
+    // Anota quem pediu no contexto da requisição. É daqui que a trilha de auditoria tira o
+    // ator das operações administrativas: o serviço que bloqueia um usuário conhece o alvo,
+    // não quem mandou bloquear.
+    definirAtorDaRequisicao(sub);
   };
 }
 

@@ -15,11 +15,21 @@ import type { Usuario } from '../entities/user.entity.js';
 import { ErroDeUsuario } from '../errors/user-error.js';
 import type { RevogadorDeSessoes } from '../interfaces/sessoes.port.js';
 import type { FiltroDeListagem, RepositorioDeUsuario } from '../repositories/user.repository.js';
+import {
+  registradorNulo,
+  type RegistradorDeAuditoria,
+} from '../../audit/interfaces/audit-recorder.js';
 
 export interface DependenciasDeUsuario {
   readonly repositorio: RepositorioDeUsuario;
   readonly servicoDeSenha: ServicoDeSenha;
   readonly sessoes: RevogadorDeSessoes;
+  /**
+   * Trilha de auditoria. Ausente, o serviço roda sem registrar — o padrão nos testes.
+   * Quem administra o usuário não aparece nos parâmetros: o ator vem do contexto da
+   * requisição, preenchido na verificação do token.
+   */
+  readonly auditoria?: RegistradorDeAuditoria;
 }
 
 export interface UserService {
@@ -34,6 +44,26 @@ export interface UserService {
 
 export function criarUserService(deps: DependenciasDeUsuario): UserService {
   const { repositorio, servicoDeSenha, sessoes } = deps;
+  const auditoria = deps.auditoria ?? registradorNulo();
+
+  /** Registra a operação sobre um usuário; o ator sai do contexto da requisição. */
+  function registrar(
+    type:
+      | 'iam.user.created'
+      | 'iam.user.updated'
+      | 'iam.user.blocked'
+      | 'iam.user.unblocked'
+      | 'iam.user.deleted',
+    alvoId: string,
+  ): Promise<void> {
+    return auditoria.registrar({
+      type,
+      actor: { id: null, type: 'user' },
+      target: { id: alvoId, type: 'user' },
+      outcome: 'success',
+      reason: 'admin_action',
+    });
+  }
 
   /**
    * Revalida a política no domínio (defesa em profundidade). O Zod da borda já reprova a
@@ -50,7 +80,9 @@ export function criarUserService(deps: DependenciasDeUsuario): UserService {
       exigirPolitica(senha, email);
       const passwordHash = await servicoDeSenha.gerarHash(senha);
       // Conflito de e-mail vira `ErroDeUsuario('email-conflito')` dentro do repositório.
-      return repositorio.criar({ email, passwordHash });
+      const criado = await repositorio.criar({ email, passwordHash });
+      await registrar('iam.user.created', criado.id);
+      return criado;
     },
 
     async obter(id): Promise<Usuario> {
@@ -70,6 +102,7 @@ export function criarUserService(deps: DependenciasDeUsuario): UserService {
     async atualizarEmail(id, email): Promise<Usuario> {
       const atualizado = await repositorio.atualizarEmail(id, email);
       if (atualizado === null) throw new ErroDeUsuario('nao-encontrado');
+      await registrar('iam.user.updated', id);
       return atualizado;
     },
 
@@ -79,12 +112,14 @@ export function criarUserService(deps: DependenciasDeUsuario): UserService {
       // Sempre revoga — inclusive num segundo block idempotente: garantir "sem sessão viva"
       // é barato e fecha a corrida em que uma sessão nasceu entre o primeiro block e este.
       await sessoes.revogarTodas(id);
+      await registrar('iam.user.blocked', id);
       return usuario;
     },
 
     async desbloquear(id): Promise<Usuario> {
       const usuario = await repositorio.definirStatus(id, 'active');
       if (usuario === null) throw new ErroDeUsuario('nao-encontrado');
+      await registrar('iam.user.unblocked', id);
       return usuario;
     },
 
@@ -94,6 +129,7 @@ export function criarUserService(deps: DependenciasDeUsuario): UserService {
       await sessoes.revogarTodas(id);
       const removido = await repositorio.remover(id);
       if (!removido) throw new ErroDeUsuario('nao-encontrado');
+      await registrar('iam.user.deleted', id);
     },
   };
 }

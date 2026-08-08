@@ -77,6 +77,16 @@ import {
   type RepositorioJwks,
 } from '../modules/jwks/index.js';
 import type { DependenciasDasRotasDeChaves } from '../modules/jwks/routes/keys-admin.routes.js';
+import {
+  criarAuditIntegrityService,
+  criarAuditQueryService,
+  criarAuditService,
+  criarMedidorDeAuditoria,
+  criarRepositorioDaTrilha,
+  criarRepositorioDeCheckpoint,
+  type DependenciasDasRotasDeAuditoria,
+  type RegistradorDeAuditoria,
+} from '../modules/audit/index.js';
 
 /**
  * Permissão exigida pelas rotas administrativas de usuário.
@@ -119,6 +129,7 @@ export interface ModulosDaAplicacao {
   readonly abac: DependenciasDasRotasDeAbac;
   readonly clientes: DependenciasDasRotasDeClientes;
   readonly chaves?: DependenciasDasRotasDeChaves;
+  readonly auditoria: DependenciasDasRotasDeAuditoria;
 }
 
 /**
@@ -137,6 +148,24 @@ function criarAutorizadorDeAdministracao(): AutorizadorAdmin {
       ? { ok: true, adminId: usuario.id }
       : { ok: false, motivo: 'sem-permissao' };
   };
+}
+
+/**
+ * Segredo que entra no hash do e-mail nos eventos sem ator identificado.
+ *
+ * Fora de produção, um valor fixo e declaradamente de desenvolvimento: sem ele o serviço não
+ * sobe, e exigir segredo para rodar `pnpm dev` só levaria a inventar um pior. Em produção,
+ * a ausência derruba o boot — a pista sem pepper é reversível por dicionário de e-mails, que
+ * é exatamente o que ela existe para impedir.
+ */
+const PEPPER_DE_DESENVOLVIMENTO = 'pepper-de-desenvolvimento-nao-use-em-producao';
+
+function exigirPepper(env: Env): string {
+  if (env.AUDIT_HINT_PEPPER !== undefined) return env.AUDIT_HINT_PEPPER;
+  if (env.NODE_ENV === 'production') {
+    throw new Error('AUDIT_HINT_PEPPER ausente: a trilha de auditoria não sobe sem ele');
+  }
+  return PEPPER_DE_DESENVOLVIMENTO;
 }
 
 export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplicacao {
@@ -166,10 +195,28 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
 
   const guards = criarGuardsDeAutorizacao(metricas ? { medidor: criarMedidorDeRbac() } : {});
 
+  /**
+   * Trilha de auditoria, construída uma vez e injetada em todos os serviços que registram.
+   *
+   * Um segundo registrador seria uma segunda cadeia disputando o mesmo documento de topo —
+   * não quebraria a integridade, mas multiplicaria a contenção sem motivo.
+   */
+  const trilha = criarRepositorioDaTrilha(banco, { maxTentativas: env.AUDIT_CAS_MAX_RETRIES });
+  const checkpoints = criarRepositorioDeCheckpoint(pool);
+  const auditoria: RegistradorDeAuditoria = criarAuditService({
+    trilha,
+    checkpoints,
+    logger,
+    pepper: exigirPepper(env),
+    checkpointACada: env.AUDIT_CHECKPOINT_EVERY,
+    ...(metricas ? { medidor: criarMedidorDeAuditoria() } : {}),
+  });
+
   const refreshTokenService = criarRefreshTokenService({
     repo: repoRefresh,
     usuarios: repoAuth,
     tokenService,
+    auditoria,
     ttlIdleMs: env.REFRESH_TOKEN_TTL_MS,
     ttlAbsolutoMs: env.REFRESH_TOKEN_ABSOLUTE_TTL_MS,
     graceMs: env.REFRESH_REUSE_GRACE_MS,
@@ -194,6 +241,7 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
     tokenService,
     refreshToken: refreshTokenService,
     denylist,
+    auditoria,
     ...(metricas ? { medidor: criarMedidorDeAuth() } : {}),
   });
 
@@ -206,6 +254,7 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
     notificacao: criarCanalDeLog(logger),
     ttlResetMin: 30,
     historicoN: 3,
+    auditoria,
   });
 
   const repoPoliticas = criarRepositorioDePolitica(pool);
@@ -219,6 +268,7 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
     escopos: criarResolvedorDeEscopos(criarCatalogoDeEscopos(pool)),
     servicoDeSenha,
     logger,
+    auditoria,
     sobreposicaoPadraoMs: env.CLIENT_SECRET_OVERLAP_DEFAULT_MS,
     ...(metricas ? { medidor: criarMedidorDeClientes() } : {}),
   });
@@ -230,6 +280,7 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
           repo: repoJwks,
           masterKey: env.MASTER_KEY,
           logger,
+          auditoria,
           invalidarCache: () => {
             jwks.invalidar();
           },
@@ -244,7 +295,12 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
     refresh: { refreshTokenService },
     senha: { passwordService, autenticar: idAutenticado },
     users: {
-      userService: criarUserService({ repositorio: repoUsuarios, servicoDeSenha, sessoes }),
+      userService: criarUserService({
+        repositorio: repoUsuarios,
+        servicoDeSenha,
+        sessoes,
+        auditoria,
+      }),
       autorizador: criarAutorizadorDeAdministracao(),
       ...(metricas ? { medidor: criarMedidorDeUsuarios() } : {}),
     },
@@ -253,8 +309,9 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
         papeis: criarRepositorioDePapel(pool),
         permissoes: criarRepositorioDePermissao(pool),
         associacoes: repoAssociacoes,
+        auditoria,
       }),
-      assignmentService: criarAssignmentService({ associacoes: repoAssociacoes }),
+      assignmentService: criarAssignmentService({ associacoes: repoAssociacoes, auditoria }),
       guards,
       verificarAccessToken,
     },
@@ -267,6 +324,16 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
     clientes: {
       service: clienteService,
       sobreposicaoPadraoMs: env.CLIENT_SECRET_OVERLAP_DEFAULT_MS,
+      guards,
+      verificarAccessToken,
+    },
+    auditoria: {
+      consulta: criarAuditQueryService(trilha),
+      integridade: criarAuditIntegrityService({
+        trilha,
+        checkpoints,
+        janelaMaxima: env.AUDIT_INTEGRITY_MAX_WINDOW,
+      }),
       guards,
       verificarAccessToken,
     },

@@ -452,3 +452,44 @@ describe('carregarEnv — origens de CORS', () => {
     expect(erro.variaveis.map((v) => v.nome)).toContain('CORS_ALLOWED_ORIGINS');
   });
 });
+
+describe('carregarEnv — auditoria', () => {
+  it('aplica os defaults de âncora, disputa do topo e teto de verificação', () => {
+    const env = carregarEnv(fonteValida());
+
+    expect(env.AUDIT_CHECKPOINT_EVERY).toBe(100);
+    expect(env.AUDIT_CAS_MAX_RETRIES).toBe(5);
+    expect(env.AUDIT_INTEGRITY_MAX_WINDOW).toBe(50_000);
+  });
+
+  it('deixa o pepper ausente por padrão — quem exige é a montagem em produção', () => {
+    expect(carregarEnv(fonteValida()).AUDIT_HINT_PEPPER).toBeUndefined();
+  });
+
+  it('recusa pepper curto demais para resistir a dicionário', () => {
+    const erro = capturarErro(fonteValida({ AUDIT_HINT_PEPPER: 'curto' }));
+
+    expect(erro.variaveis.map((v) => v.nome)).toContain('AUDIT_HINT_PEPPER');
+  });
+
+  it('recusa âncora a cada zero eventos: seria ancorar em toda escrita', () => {
+    const erro = capturarErro(fonteValida({ AUDIT_CHECKPOINT_EVERY: '0' }));
+
+    expect(erro.variaveis.map((v) => v.nome)).toContain('AUDIT_CHECKPOINT_EVERY');
+  });
+
+  it('coage os números vindos como texto do ambiente', () => {
+    const env = carregarEnv(
+      fonteValida({ AUDIT_CHECKPOINT_EVERY: '250', AUDIT_CAS_MAX_RETRIES: '9' }),
+    );
+
+    expect(env.AUDIT_CHECKPOINT_EVERY).toBe(250);
+    expect(env.AUDIT_CAS_MAX_RETRIES).toBe(9);
+  });
+
+  it('não deixa o valor do pepper aparecer na descrição do erro', () => {
+    const erro = capturarErro(fonteValida({ AUDIT_HINT_PEPPER: 'segredo-curto' }));
+
+    expect(JSON.stringify(erro.variaveis)).not.toContain('segredo-curto');
+  });
+});

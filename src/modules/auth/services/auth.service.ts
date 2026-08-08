@@ -17,6 +17,10 @@ import type { RepositorioDeDenylist } from '../repositories/token-denylist.repos
 import type { PortaDeRefreshToken } from '../interfaces/refresh-token.port.js';
 import type { TokenService } from './token.service.js';
 import { medidorDeAuthNulo, type MedidorDeAuth } from '../metrics/auth.metrics.js';
+import {
+  registradorNulo,
+  type RegistradorDeAuditoria,
+} from '../../audit/interfaces/audit-recorder.js';
 
 export interface Credenciais {
   readonly email: string;
@@ -46,6 +50,8 @@ export interface DependenciasDoAuthService {
   readonly medidor?: MedidorDeAuth;
   /** Scope padrão dos tokens emitidos no login por senha. */
   readonly scopePadrao?: string;
+  /** Trilha de auditoria. Ausente, o serviço roda sem registrar — o padrão nos testes. */
+  readonly auditoria?: RegistradorDeAuditoria;
 }
 
 export interface AuthService {
@@ -56,7 +62,25 @@ export interface AuthService {
 
 export function criarAuthService(deps: DependenciasDoAuthService): AuthService {
   const medidor = deps.medidor ?? medidorDeAuthNulo();
+  const auditoria = deps.auditoria ?? registradorNulo();
   const scope = deps.scopePadrao ?? '';
+
+  /**
+   * A trilha registra a tentativa falha sem dizer qual conta existe.
+   *
+   * A resposta ao cliente é genérica por design, e a trilha não pode desfazer isso guardando
+   * o e-mail digitado — que, num ataque de enumeração, é e-mail de terceiro. O que vai é a
+   * pista derivada, suficiente para contar tentativas contra o mesmo alvo.
+   */
+  async function registrarFalha(email: string, atorId: string | null): Promise<void> {
+    await auditoria.registrar({
+      type: 'iam.auth.login_failed',
+      actor: { id: atorId, type: 'user' },
+      outcome: 'failure',
+      reason: 'invalid_credentials',
+      subjectEmail: email,
+    });
+  }
 
   return {
     async login(credenciais: Credenciais): Promise<ParDeTokens> {
@@ -69,6 +93,7 @@ export function criarAuthService(deps: DependenciasDoAuthService): AuthService {
           await deps.servicoDeSenha.hashFantasma(),
         );
         medidor.contarFalha('desconhecido');
+        await registrarFalha(credenciais.email, null);
         throw new ErroDeAutenticacao('credencial-invalida');
       }
 
@@ -78,11 +103,18 @@ export function criarAuthService(deps: DependenciasDoAuthService): AuthService {
       );
       if (!senhaConfere) {
         medidor.contarFalha('senha');
+        await registrarFalha(credenciais.email, usuario.id);
         throw new ErroDeAutenticacao('credencial-invalida');
       }
 
       if (usuario.status !== 'active') {
         medidor.contarFalha('bloqueado');
+        await auditoria.registrar({
+          type: 'iam.auth.login_failed',
+          actor: { id: usuario.id, type: 'user' },
+          outcome: 'failure',
+          reason: 'account_blocked',
+        });
         throw new ErroDeAutenticacao('credencial-invalida');
       }
 
@@ -99,6 +131,11 @@ export function criarAuthService(deps: DependenciasDoAuthService): AuthService {
       const refreshToken = await deps.refreshToken.emitir(usuario.id);
 
       medidor.contarSucesso();
+      await auditoria.registrar({
+        type: 'iam.auth.login',
+        actor: { id: usuario.id, type: 'user' },
+        outcome: 'success',
+      });
       return {
         accessToken: emitido.token,
         refreshToken,
@@ -116,6 +153,12 @@ export function criarAuthService(deps: DependenciasDoAuthService): AuthService {
       if (dados.refreshToken !== undefined) {
         await deps.refreshToken.revogar(dados.refreshToken);
       }
+      await auditoria.registrar({
+        type: 'iam.auth.logout',
+        actor: { id: dados.userId, type: 'user' },
+        outcome: 'success',
+        reason: 'self_service',
+      });
     },
 
     async perfil(userId: string): Promise<PerfilDoUsuario | null> {

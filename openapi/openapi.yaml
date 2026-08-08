@@ -33,6 +33,11 @@ tags:
       Clientes de API — a identidade de uma aplicação, não de uma pessoa. O escopo concedido
       é o nome de uma permissão do catálogo do RBAC, então o mesmo guard autoriza token de
       usuário e token de cliente.
+  - name: audit
+    description: >-
+      Trilha de auditoria append-only. Encadeada por hash e ancorada no PostgreSQL: a leitura
+      mostra o que aconteceu, e a verificação diz se alguém mexeu no registro depois. Não há
+      rota de escrita — a trilha é alimentada de dentro do processo.
   - name: abac
     description: >-
       Políticas por atributo sobre o RBAC. A decisão é sempre server-side (PDP/PEP) e nunca
@@ -476,6 +481,107 @@ components:
           type: string
           format: uuid
         reason: { type: string, enum: [matched, no-applicable-policy] }
+    AuditEvent:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          seq,
+          event_id,
+          type,
+          occurred_at,
+          actor,
+          target,
+          outcome,
+          reason,
+          subject_hint,
+          metadata,
+          request_id,
+          trace_id,
+          hash,
+        ]
+      properties:
+        seq: { type: integer, description: 'Posição na cadeia: contígua e única' }
+        event_id: { type: string }
+        type: { type: string, example: iam.auth.login_failed }
+        occurred_at: { type: string, format: date-time }
+        actor:
+          type: object
+          additionalProperties: false
+          required: [id, type]
+          properties:
+            id:
+              type: string
+              nullable: true
+              description: Nulo quando a operação não tinha ninguém autenticado.
+            type: { type: string, enum: [user, client, system] }
+            ip: { type: string }
+            user_agent: { type: string }
+        target:
+          type: object
+          nullable: true
+          additionalProperties: false
+          required: [id, type]
+          properties:
+            id: { type: string }
+            type: { type: string, enum: [user, role, client, key, session] }
+        outcome: { type: string, enum: [success, failure] }
+        reason: { type: string, nullable: true }
+        subject_hint:
+          type: string
+          nullable: true
+          description: >-
+            sha256 do e-mail com pepper, presente quando não há ator identificado. Existe para
+            correlacionar tentativas contra o mesmo alvo sem guardar o endereço.
+        metadata: { type: object, additionalProperties: true }
+        request_id: { type: string, nullable: true }
+        trace_id: { type: string, nullable: true }
+        hash: { type: string }
+    AuditEventDetail:
+      allOf:
+        - $ref: '#/components/schemas/AuditEvent'
+        - type: object
+          required: [prev_hash]
+          properties:
+            prev_hash: { type: string }
+    AuditEventPage:
+      type: object
+      additionalProperties: false
+      required: [itens, proximo_cursor, tem_mais]
+      properties:
+        itens:
+          type: array
+          items: { $ref: '#/components/schemas/AuditEvent' }
+        proximo_cursor: { type: integer, nullable: true }
+        tem_mais: { type: boolean }
+    AuditIntegrityReport:
+      type: object
+      additionalProperties: false
+      required: [integra, de, ate, verificados, primeira_quebra, checkpoint_conferido]
+      properties:
+        integra: { type: boolean }
+        de: { type: integer }
+        ate: { type: integer }
+        verificados: { type: integer }
+        primeira_quebra:
+          type: object
+          nullable: true
+          additionalProperties: false
+          required: [seq, motivo]
+          properties:
+            seq: { type: integer }
+            motivo:
+              type: string
+              enum: [hash-divergente, elo-quebrado, seq-faltante, checkpoint-divergente]
+        checkpoint_conferido:
+          type: object
+          nullable: true
+          additionalProperties: false
+          required: [seq, hash, confere]
+          properties:
+            seq: { type: integer }
+            hash: { type: string }
+            confere: { type: boolean }
   securitySchemes:
     BearerAuth:
       type: http
@@ -504,6 +610,16 @@ components:
           schema: { $ref: '#/components/schemas/Problem' }
     ProblemConflito:
       description: Conflito — recurso de sistema imutável ou nome já existente
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    ProblemMetodoNaoPermitido:
+      description: Método recusado por contrato
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    ProblemTrilhaIndisponivel:
+      description: Falha ao ler a trilha ou as âncoras
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
@@ -1896,3 +2012,95 @@ paths:
         '403': { $ref: '#/components/responses/ProblemSemPermissao' }
         '404': { $ref: '#/components/responses/ProblemNaoEncontrado' }
         '409': { $ref: '#/components/responses/ProblemConflito' }
+  /audit/events:
+    get:
+      tags: [audit]
+      summary: Lista eventos da trilha de auditoria
+      description: >-
+        Exige a permissão `audit:read`. Pagina por posição na cadeia: `proximo_cursor` é a
+        posição em que a próxima página começa. Ator e alvo só aceitam UUID — a trilha não é
+        consultável por e-mail, para a leitura não virar um oráculo de enumeração.
+      operationId: auditListEvents
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { in: query, name: type, schema: { type: string } }
+        - { in: query, name: actor_id, schema: { type: string, format: uuid } }
+        - { in: query, name: target_id, schema: { type: string, format: uuid } }
+        - { in: query, name: outcome, schema: { type: string, enum: [success, failure] } }
+        - { in: query, name: de, schema: { type: string, format: date-time } }
+        - { in: query, name: ate, schema: { type: string, format: date-time } }
+        - { in: query, name: cursor, schema: { type: integer, minimum: 0 } }
+        - {
+            in: query,
+            name: limite,
+            schema: { type: integer, minimum: 1, maximum: 200, default: 50 },
+          }
+      responses:
+        '200':
+          description: Página de eventos
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuditEventPage' }
+        '400': { $ref: '#/components/responses/ProblemValidacao' }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+        '503': { $ref: '#/components/responses/ProblemTrilhaIndisponivel' }
+    post:
+      tags: [audit]
+      summary: Recusa escrita externa na trilha
+      description: >-
+        Responde sempre 405. A rota existe para a recusa fazer parte do contrato: a trilha é
+        alimentada de dentro do processo, e um 404 deixaria a ausência parecendo esquecimento.
+      operationId: auditRejectWrite
+      security: [{ BearerAuth: [] }]
+      responses:
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+        '405': { $ref: '#/components/responses/ProblemMetodoNaoPermitido' }
+  /audit/events/{seq}:
+    get:
+      tags: [audit]
+      summary: Obtém um evento pela posição na cadeia
+      description: >-
+        Exige `audit:read`. O detalhe acrescenta `prev_hash`, que a listagem omite: numa
+        página parcial ele só induziria a tentar validar a cadeia com o pedaço errado.
+      operationId: auditGetEvent
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { in: path, name: seq, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200':
+          description: Evento
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuditEventDetail' }
+        '400': { $ref: '#/components/responses/ProblemValidacao' }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+        '404': { $ref: '#/components/responses/ProblemNaoEncontrado' }
+        '503': { $ref: '#/components/responses/ProblemTrilhaIndisponivel' }
+  /audit/integrity:
+    get:
+      tags: [audit]
+      summary: Verifica a integridade da cadeia numa faixa
+      description: >-
+        Exige `audit:verify`. Recomputa o elo de cada evento da faixa e confronta a cadeia com
+        a âncora gravada no PostgreSQL. Trilha adulterada responde **200** com
+        `integra: false` — a verificação executou, e o achado é o resultado; 503 fica para
+        falha de infraestrutura durante a varredura. Faixa acima do teto configurado é 400:
+        verificar a trilha inteira numa requisição prende o processo.
+      operationId: auditVerifyIntegrity
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { in: query, name: de, schema: { type: integer, minimum: 1, default: 1 } }
+        - { in: query, name: ate, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200':
+          description: Relatório de integridade
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuditIntegrityReport' }
+        '400': { $ref: '#/components/responses/ProblemValidacao' }
+        '401': { $ref: '#/components/responses/ProblemNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ProblemSemPermissao' }
+        '503': { $ref: '#/components/responses/ProblemTrilhaIndisponivel' }

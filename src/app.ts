@@ -39,6 +39,8 @@ import type { DependenciasDoController as DependenciasDeUsuarios } from './modul
 import { registrarRotasDeRbac } from './modules/rbac/index.js';
 import { registrarRotasDeAbac } from './modules/abac/index.js';
 import { registrarRotasDeClientes } from './modules/api-clients/index.js';
+import { registrarRotasDeAuditoria } from './modules/audit/index.js';
+import { registrarContextoDeRequisicao } from './plugins/request-context.js';
 import { registrarRotasDeChaves } from './modules/jwks/index.js';
 
 const TIPO_PROBLEM_JSON = 'application/problem+json';
@@ -210,6 +212,10 @@ export async function construirApp(
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
 
+  // Antes de qualquer rota: o hook abre o contexto que a trilha de auditoria lê para saber
+  // de onde veio a chamada. Registrado depois, as rotas já definidas não passariam por ele.
+  registrarContextoDeRequisicao(app);
+
   const inventarioDeRotas: RotaRegistrada[] = [];
   app.decorate('inventarioDeRotas', inventarioDeRotas);
   app.addHook('onRoute', (opcoes) => {
@@ -327,6 +333,7 @@ export async function construirApp(
     registrarRotasDeRbac(app, modulos.rbac);
     registrarRotasDeAbac(app, modulos.abac);
     registrarRotasDeClientes(app, modulos.clientes);
+    registrarRotasDeAuditoria(app, modulos.auditoria);
 
     // Ausente quando não há segredo mestre: sem ele o serviço de rotação não existe, e as
     // rotas administrativas de chave não teriam o que servir.
