@@ -202,7 +202,127 @@ describe('login', () => {
       }),
       { ttlSegundos: 120 },
     );
-    expect(par.accessToken).toBe('jwt-abc');
+    expect(par).toMatchObject({ accessToken: 'jwt-abc' });
+  });
+});
+
+describe('login com segundo fator', () => {
+  function comMfa(opcoes: {
+    desafio?: { token: string; expiraEmSegundos: number } | null;
+    resolvido?: { userId: string; metodo: 'otp' | 'recovery' } | null;
+  }): ReturnType<typeof montar> & { desafiar: ReturnType<typeof vi.fn> } {
+    const desafiar = vi.fn(() => Promise.resolve(opcoes.desafio ?? null));
+    const resolver = vi.fn(() => Promise.resolve(opcoes.resolvido ?? null));
+    const fakes = montar(
+      { id: 'u1', email: 'a@iam.local', status: 'active', roles: ['admin'] },
+      { mfa: { desafiar, resolver } },
+    );
+    return { ...fakes, desafiar };
+  }
+
+  it('sem porta de MFA o login segue de um passo só', async () => {
+    // É esta linha que mantém a suíte da SPEC 001 válida: porta ausente, nada muda.
+    const { service } = montar({
+      id: 'u1',
+      email: 'a@iam.local',
+      status: 'active',
+      roles: [],
+    });
+
+    const resultado = await service.login({ email: 'a@iam.local', senha: 'correta' });
+
+    expect(resultado).toMatchObject({ accessToken: 'jwt-abc' });
+  });
+
+  it('com fator ativo devolve o desafio e nenhum token', async () => {
+    const { service, emitir } = comMfa({
+      desafio: { token: 'mfa-token', expiraEmSegundos: 300 },
+    });
+
+    const resultado = await service.login({ email: 'a@iam.local', senha: 'correta' });
+
+    expect(resultado).toEqual({
+      mfaRequerido: true,
+      mfaToken: 'mfa-token',
+      expiraEmSegundos: 300,
+    });
+    expect(emitir).not.toHaveBeenCalled();
+  });
+
+  it('o desafio só é pedido depois de a senha conferir', async () => {
+    const { service, desafiar } = comMfa({ desafio: null });
+
+    await expect(service.login({ email: 'a@iam.local', senha: 'errada' })).rejects.toBeInstanceOf(
+      ErroDeAutenticacao,
+    );
+    expect(desafiar).not.toHaveBeenCalled();
+  });
+});
+
+describe('concluirDesafio', () => {
+  function comResolucao(
+    resolvido: { userId: string; metodo: 'otp' | 'recovery' } | null,
+  ): ReturnType<typeof montar> {
+    return montar(
+      { id: 'u1', email: 'a@iam.local', status: 'active', roles: ['admin'] },
+      {
+        mfa: {
+          desafiar: () => Promise.resolve(null),
+          resolver: () => Promise.resolve(resolvido),
+        },
+      },
+    );
+  }
+
+  it('emite o par com amr e mfa quando o código confere', async () => {
+    const { service, emitir } = comResolucao({ userId: 'u1', metodo: 'otp' });
+
+    const par = await service.concluirDesafio('mfa-token', { codigo: '123456' });
+
+    expect(par).toMatchObject({ accessToken: 'jwt-abc', refreshToken: 'refresh-opaco' });
+    expect(emitir).toHaveBeenCalledWith(
+      expect.objectContaining({ amr: ['pwd', 'otp'], mfa: true }),
+      undefined,
+    );
+  });
+
+  it('marca o método quando veio de código de recuperação', async () => {
+    const { service, emitir } = comResolucao({ userId: 'u1', metodo: 'recovery' });
+
+    await service.concluirDesafio('mfa-token', { codigoDeRecuperacao: 'ABCDEF' });
+
+    expect(emitir).toHaveBeenCalledWith(
+      expect.objectContaining({ amr: ['pwd', 'recovery'] }),
+      undefined,
+    );
+  });
+
+  it('desafio não resolvido falha sem emitir token', async () => {
+    const { service, emitir, contarFalha } = comResolucao(null);
+
+    await expect(service.concluirDesafio('mfa-token', { codigo: '000000' })).rejects.toMatchObject({
+      codigo: 'desafio-mfa-invalido',
+    });
+    expect(emitir).not.toHaveBeenCalled();
+    expect(contarFalha).toHaveBeenCalledWith('mfa');
+  });
+
+  it('conta bloqueada entre a senha e o segundo fator não recebe token', async () => {
+    // O desafio vale cinco minutos; nesse intervalo dá tempo de a conta cair.
+    const bloqueado = montar(
+      { id: 'u1', email: 'a@iam.local', status: 'blocked', roles: [] },
+      {
+        mfa: {
+          desafiar: () => Promise.resolve(null),
+          resolver: () => Promise.resolve({ userId: 'u1', metodo: 'otp' as const }),
+        },
+      },
+    );
+
+    await expect(
+      bloqueado.service.concluirDesafio('mfa-token', { codigo: '123456' }),
+    ).rejects.toMatchObject({ codigo: 'credencial-invalida' });
+    expect(bloqueado.emitir).not.toHaveBeenCalled();
   });
 });
 

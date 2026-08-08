@@ -9,7 +9,8 @@
 export type CodigoDeErroDeAutenticacao =
   | 'credencial-invalida' // 401 — login falhou (motivo genérico)
   | 'token-invalido' // 401 — access token ausente/malformado/assinatura/exp/iss/aud
-  | 'token-revogado'; // 401 — jti na denylist
+  | 'token-revogado' // 401 — jti na denylist
+  | 'desafio-mfa-invalido'; // 400 — desafio de MFA inexistente, expirado, esgotado ou errado
 
 export class ErroDeAutenticacao extends Error {
   public readonly codigo: CodigoDeErroDeAutenticacao;

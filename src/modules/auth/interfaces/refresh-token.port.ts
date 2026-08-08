@@ -13,6 +13,12 @@ export interface ContextoDeEmissao {
   readonly clientId?: string | null;
   /** Escopo concedido na emissão; a rotação não pode ampliá-lo. */
   readonly escopo?: string | null;
+  /**
+   * Como o sujeito se autenticou nesta família. Viaja com ela porque, sem isso, a primeira
+   * renovação transformaria uma sessão de dois fatores numa que **diz** ter um só — e
+   * qualquer política que exija fator forte passaria a falhar 15 minutos depois do login.
+   */
+  readonly amr?: readonly string[] | null;
 }
 
 export interface PortaDeRefreshToken {

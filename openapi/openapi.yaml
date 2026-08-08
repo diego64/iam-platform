@@ -42,6 +42,11 @@ tags:
     description: >-
       Políticas por atributo sobre o RBAC. A decisão é sempre server-side (PDP/PEP) e nunca
       entra no token: uma condição sobre o recurso precisa do recurso em mãos.
+  - name: mfa
+    description: >-
+      Segundo fator (TOTP e códigos de recuperação). Com fator ativo, `POST /auth/login`
+      devolve um desafio em vez dos tokens, e `POST /auth/mfa/verify` o troca pelo par. Quem
+      não tem fator não percebe diferença.
   - name: oauth
     description: >-
       Superfície OAuth 2.0 (RFC 6749). O corpo é form-urlencoded e o erro segue o formato da
@@ -112,6 +117,79 @@ components:
           enum: [Bearer]
         expires_in:
           type: integer
+    DesafioDeMfa:
+      type: object
+      additionalProperties: false
+      required: [mfa_required, mfa_token, expires_in]
+      properties:
+        mfa_required:
+          type: boolean
+          enum: [true]
+        mfa_token:
+          type: string
+          description: Opaco, de uso único, válido por poucos minutos.
+        expires_in:
+          type: integer
+    EstadoDeMfa:
+      type: object
+      additionalProperties: false
+      required: [enabled, status, type, confirmed_at, last_used_at, recovery_codes_remaining]
+      properties:
+        enabled:
+          type: boolean
+        status:
+          type: string
+          enum: [active, pending, none]
+        type:
+          type: string
+          nullable: true
+          enum: [totp]
+        confirmed_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
+        recovery_codes_remaining:
+          type: integer
+    CadastroDeTotp:
+      type: object
+      additionalProperties: false
+      required: [secret, otpauth_uri]
+      properties:
+        secret:
+          type: string
+          description: Base32 do segredo. Aparece uma única vez.
+        otpauth_uri:
+          type: string
+          description: URI que o aplicativo autenticador lê do QR Code.
+    ConfirmacaoDeTotp:
+      type: object
+      additionalProperties: false
+      required: [status, confirmed_at, recovery_codes]
+      properties:
+        status:
+          type: string
+          enum: [active]
+        confirmed_at:
+          type: string
+          format: date-time
+        recovery_codes:
+          type: array
+          description: Entregues uma única vez; não há endpoint para recuperá-los.
+          items:
+            type: string
+    CodigosDeRecuperacao:
+      type: object
+      additionalProperties: false
+      required: [recovery_codes]
+      properties:
+        recovery_codes:
+          type: array
+          items:
+            type: string
     TokenRequest:
       type: object
       # Sem `additionalProperties: false`: a RFC 6749 §3.2 manda ignorar parâmetro
@@ -1240,11 +1318,16 @@ paths:
               $ref: '#/components/schemas/LoginRequest'
       responses:
         '200':
-          description: Tokens emitidos
+          description: >-
+            Tokens emitidos, ou o desafio de segundo fator quando a conta tem MFA ativo. O
+            desafio é metade do caminho feliz, não erro: o cliente distingue pelo campo
+            `mfa_required`.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/LoginResponse'
+                oneOf:
+                  - $ref: '#/components/schemas/LoginResponse'
+                  - $ref: '#/components/schemas/DesafioDeMfa'
         '400':
           description: Requisição inválida
           content:
@@ -1326,6 +1409,245 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuthorizationServerMetadata'
+  /auth/mfa:
+    get:
+      tags: [mfa]
+      summary: Estado do segundo fator do usuário autenticado
+      description: >
+        Nunca devolve o segredo. `pending` é cadastro iniciado e não confirmado, que não
+        protege a conta.
+      operationId: mfaEstado
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: Estado do fator
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EstadoDeMfa'
+        '401':
+          description: Token inválido
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /auth/mfa/totp:
+    post:
+      tags: [mfa]
+      summary: Inicia o cadastro de TOTP
+      description: >
+        Devolve o segredo uma única vez. O fator nasce pendente e não protege nada até ser
+        confirmado com um código válido.
+      operationId: mfaIniciarCadastro
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                label:
+                  type: string
+                  maxLength: 64
+      responses:
+        '201':
+          description: Cadastro iniciado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CadastroDeTotp'
+        '409':
+          description: Já existe fator ativo
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+    delete:
+      tags: [mfa]
+      summary: Desativa o segundo fator (exige a senha atual)
+      description: >
+        A senha é exigida porque, sem ela, um access token roubado desligaria o segundo
+        fator da vítima. Apaga também os códigos de recuperação.
+      operationId: mfaDesativar
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [senha]
+              properties:
+                senha:
+                  type: string
+                  minLength: 8
+                  maxLength: 128
+      responses:
+        '204':
+          description: Fator removido
+        '401':
+          description: Senha inválida
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '404':
+          description: Sem fator habilitado
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /auth/mfa/totp/confirm:
+    post:
+      tags: [mfa]
+      summary: Ativa o fator e entrega os códigos de recuperação
+      description: >
+        O código válido é a prova de posse do dispositivo. Os códigos de recuperação
+        aparecem uma única vez — não há endpoint para recuperá-los.
+      operationId: mfaConfirmarCadastro
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [code]
+              properties:
+                code:
+                  type: string
+                  pattern: '^[0-9]{6}$'
+      responses:
+        '200':
+          description: Fator ativo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfirmacaoDeTotp'
+        '400':
+          description: Código inválido — o cadastro segue pendente
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '404':
+          description: Nenhum cadastro pendente
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /auth/mfa/recovery-codes:
+    post:
+      tags: [mfa]
+      summary: Regenera os códigos de recuperação (exige a senha atual)
+      description: O conjunto anterior deixa de valer inteiro, usado ou não.
+      operationId: mfaRegenerarCodigos
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [senha]
+              properties:
+                senha:
+                  type: string
+                  minLength: 8
+                  maxLength: 128
+      responses:
+        '200':
+          description: Códigos novos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodigosDeRecuperacao'
+        '401':
+          description: Senha inválida
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /auth/mfa/verify:
+    post:
+      tags: [mfa]
+      summary: Responde ao desafio e emite o par de tokens
+      description: >
+        Aceita `code` (TOTP) ou `recovery_code`, nunca os dois. Desafio inexistente,
+        expirado, com tentativas esgotadas e código errado respondem a mesma coisa.
+      operationId: mfaVerificar
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [mfa_token]
+              properties:
+                mfa_token:
+                  type: string
+                code:
+                  type: string
+                  pattern: '^[0-9]{6}$'
+                recovery_code:
+                  type: string
+      responses:
+        '200':
+          description: Tokens emitidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          description: Desafio inválido, expirado, esgotado ou resposta errada
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '429':
+          description: Rate limit excedido
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /users/{id}/mfa/reset:
+    post:
+      tags: [mfa]
+      summary: Remove o segundo fator de um usuário e derruba as sessões dele
+      description: >
+        Saída para conta travada. Exige a permissão `mfa:reset`, que no seed só o superadmin
+        tem.
+      operationId: mfaResetAdministrativo
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Fator removido
+        '403':
+          description: Sem a permissão mfa:reset
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '404':
+          description: Usuário sem fator
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
   /auth/refresh:
     post:
       tags: [auth]

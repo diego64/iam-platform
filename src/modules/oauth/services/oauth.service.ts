@@ -19,6 +19,7 @@ import type { ClientAuthService } from '../../api-clients/services/client-auth.s
 import type { ClienteAutenticado, TipoDeGrant } from '../../api-clients/types/api-client.types.js';
 import type { TokenService } from '../../auth/services/token.service.js';
 import type { AuthService } from '../../auth/services/auth.service.js';
+import { exigeSegundoFator } from '../../auth/types/auth.types.js';
 import type { RefreshTokenService } from '../../refresh-token/services/refresh-token.service.js';
 import { ErroDeRefreshInvalido } from '../../refresh-token/errors/refresh-token-error.js';
 import { medidorDeOAuthNulo, type MedidorDeOAuth } from '../metrics/oauth.metrics.js';
@@ -179,6 +180,14 @@ export function criarOAuthService(deps: DependenciasDoOAuthService): OAuthServic
             : { ttlSegundos: cliente.accessTokenTtlSegundos }),
         },
       );
+
+      if (exigeSegundoFator(par)) {
+        // O grant `password` não tem por onde apresentar um desafio: não há redirecionamento
+        // nem tela. Conta com segundo fator simplesmente não se autentica por aqui, e o
+        // motivo fica na métrica — dizer "faltou MFA" ao cliente revelaria que a conta tem
+        // segundo fator a quem só apresentou a senha.
+        throw new ErroDeOAuth('invalid_grant');
+      }
 
       return {
         accessToken: par.accessToken,

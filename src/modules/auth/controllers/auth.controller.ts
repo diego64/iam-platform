@@ -12,6 +12,7 @@ import { montarProblema } from '../../../shared/errors/problem-json.js';
 import { ErroDeAutenticacao } from '../errors/auth-error.js';
 import type { AuthService } from '../services/auth.service.js';
 import type { LoginBody } from '../schemas/auth.schema.js';
+import { exigeSegundoFator } from '../types/auth.types.js';
 
 const TIPO_PROBLEM_JSON = 'application/problem+json';
 
@@ -37,12 +38,24 @@ export function criarControllerDeAuth(deps: DependenciasDoControllerDeAuth): Con
     async login(requisicao: FastifyRequest, resposta: FastifyReply): Promise<void> {
       const { email, senha } = requisicao.body as LoginBody;
       try {
-        const par = await deps.authService.login({ email, senha });
+        const resultado = await deps.authService.login({ email, senha });
+
+        // Duas formas no mesmo 200: o desafio é metade do caminho feliz, não erro. Quem não
+        // tem segundo fator recebe exatamente o corpo de antes desta SPEC.
+        if (exigeSegundoFator(resultado)) {
+          await resposta.status(200).send({
+            mfa_required: true,
+            mfa_token: resultado.mfaToken,
+            expires_in: resultado.expiraEmSegundos,
+          });
+          return;
+        }
+
         await resposta.status(200).send({
-          access_token: par.accessToken,
-          refresh_token: par.refreshToken,
+          access_token: resultado.accessToken,
+          refresh_token: resultado.refreshToken,
           token_type: 'Bearer',
-          expires_in: par.expiraEmSegundos,
+          expires_in: resultado.expiraEmSegundos,
         });
       } catch (erro) {
         if (erro instanceof ErroDeAutenticacao) {

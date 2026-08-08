@@ -33,6 +33,14 @@ export interface DadosParaToken {
   readonly subType?: TipoDeSujeito;
   /** Cliente que pediu o token, quando a emissão passou pelo endpoint de OAuth. */
   readonly clientId?: string;
+  /**
+   * Como o sujeito se autenticou (RFC 8176): `pwd` sozinho no login de um passo, `pwd`+`otp`
+   * ou `pwd`+`recovery` depois do segundo fator. Quem quiser exigir fator forte numa
+   * operação crítica precisa distinguir os três.
+   */
+  readonly amr?: readonly string[];
+  /** Atalho para quem só quer saber se houve segundo fator. */
+  readonly mfa?: boolean;
 }
 
 export interface OpcoesDeEmissao {
@@ -74,6 +82,8 @@ export function criarTokenService(
         perm: dados.permissions,
         sub_type: dados.subType,
         client_id: dados.clientId,
+        amr: dados.amr,
+        mfa: dados.mfa,
       })
         .setProtectedHeader({ alg: 'EdDSA', kid })
         .setSubject(dados.sub)

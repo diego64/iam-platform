@@ -29,6 +29,8 @@ export interface RefreshPersistido {
   readonly clientId: string | null;
   /** Escopo concedido na emissão. A rotação não pode ampliá-lo (RFC 6749 §6). */
   readonly escopo: string | null;
+  /** Força da autenticação que criou a família. Ausente é lido como `['pwd']`. */
+  readonly amr: readonly string[];
 }
 
 export interface EntradaDeRegistro {
@@ -39,6 +41,7 @@ export interface EntradaDeRegistro {
   readonly absoluteExpiresAt: Date;
   readonly clientId?: string | null;
   readonly escopo?: string | null;
+  readonly amr?: readonly string[] | null;
 }
 
 export interface RepositorioDeRefreshToken {
@@ -75,6 +78,7 @@ interface LinhaMongo {
   // e ausente é lido como `null` — o que o mantém resgatável só por `/auth/refresh`.
   readonly client_id?: string | null;
   readonly scope?: string | null;
+  readonly amr?: readonly string[] | null;
 }
 
 function paraDominio(linha: LinhaMongo): RefreshPersistido {
@@ -87,6 +91,8 @@ function paraDominio(linha: LinhaMongo): RefreshPersistido {
     absoluteExpiresAt: linha.absolute_expires_at,
     clientId: linha.client_id ?? null,
     escopo: linha.scope ?? null,
+    // Documento anterior ao segundo fator não tem o campo: aquela sessão nasceu de senha.
+    amr: linha.amr ?? ['pwd'],
   };
 }
 
@@ -107,6 +113,7 @@ export function criarRepositorioDeRefreshToken(banco: Db): RepositorioDeRefreshT
         expires_at: entrada.absoluteExpiresAt,
         client_id: entrada.clientId ?? null,
         scope: entrada.escopo ?? null,
+        amr: entrada.amr ?? ['pwd'],
       });
     },
 

@@ -227,6 +227,21 @@ export const esquemaEnv = z.object({
   // deploy e sem tocar em cliente nenhum.
   OAUTH_PASSWORD_GRANT_ENABLED: booleanoDeAmbiente(true),
 
+  // Segundo fator (TOTP). O emissor é o nome que aparece no aplicativo autenticador; sem
+  // valor próprio, cai no host do emissor do JWT. A janela de tolerância é em passos de
+  // 30 s para cada lado — aumentar ajuda relógio dessincronizado e amplia a superfície de
+  // um código interceptado, que o anti-replay por passo já fecha do lado do passado.
+  MFA_ISSUER: z.string().min(1).optional(),
+  MFA_CHALLENGE_TTL_MS: z.coerce
+    .number()
+    .int()
+    .min(30_000)
+    .max(15 * 60 * 1000)
+    .default(5 * 60 * 1000),
+  MFA_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(20).default(5),
+  MFA_TOTP_WINDOW: z.coerce.number().int().min(0).max(5).default(1),
+  MFA_RECOVERY_CODE_COUNT: z.coerce.number().int().min(4).max(20).default(10),
+
   // Janela padrão em que o segredo anterior de um cliente continua aceito depois da
   // rotação. Existe porque trocar o segredo de um serviço em produção envolve deploy: com a
   // troca atômica, haveria um intervalo em que as réplicas antigas já não autenticam.
