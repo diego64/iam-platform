@@ -13,7 +13,7 @@ export const loginBody = z
   .strict();
 export type LoginBody = z.infer<typeof loginBody>;
 
-export const respostaLogin = z
+export const respostaComTokens = z
   .object({
     access_token: z.string(),
     refresh_token: z.string(),
@@ -21,6 +21,24 @@ export const respostaLogin = z
     expires_in: z.number().int().positive(),
   })
   .strict();
+
+/**
+ * O login parou no primeiro fator. Sem `access_token` de propósito: o cliente que ignorar a
+ * diferença e ler o token direto recebe `undefined`, não um token pela metade.
+ */
+export const respostaDeDesafioDeMfa = z
+  .object({
+    mfa_required: z.literal(true),
+    mfa_token: z.string(),
+    expires_in: z.number().int().positive(),
+  })
+  .strict();
+
+/**
+ * As duas formas do 200 do login. A união é discriminada por `mfa_required`; o OpenAPI a
+ * publica como `oneOf`.
+ */
+export const respostaLogin = z.union([respostaComTokens, respostaDeDesafioDeMfa]);
 
 export const logoutBody = z
   .object({
