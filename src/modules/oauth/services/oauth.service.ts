@@ -18,6 +18,7 @@ import type { CredencialDeCliente } from './client-credentials.js';
 import type { ClientAuthService } from '../../api-clients/services/client-auth.service.js';
 import type { ClienteAutenticado, TipoDeGrant } from '../../api-clients/types/api-client.types.js';
 import type { TokenService } from '../../auth/services/token.service.js';
+import type { AuthService } from '../../auth/services/auth.service.js';
 
 const GRANTS_CONHECIDOS: readonly TipoDeGrant[] = [
   'client_credentials',
@@ -29,6 +30,9 @@ export interface PedidoDeToken {
   readonly grantType: string;
   readonly credencial: CredencialDeCliente;
   readonly escoposSolicitados?: readonly string[] | undefined;
+  /** `password` grant: credencial do dono do recurso. */
+  readonly username?: string | undefined;
+  readonly password?: string | undefined;
 }
 
 /** A resposta da RFC 6749 §5.1, no vocabulário do domínio. */
@@ -43,6 +47,12 @@ export interface TokenConcedido {
 export interface DependenciasDoOAuthService {
   readonly clientAuth: ClientAuthService;
   readonly tokenService: TokenService;
+  readonly authService: Pick<AuthService, 'login'>;
+  /**
+   * Interruptor global do `password` grant. Desligado, o grant deixa de existir para todos
+   * os clientes — a saída de incidente que não depende de editar cliente por cliente.
+   */
+  readonly passwordGrantHabilitado: boolean;
 }
 
 export interface OAuthService {
@@ -114,12 +124,74 @@ export function criarOAuthService(deps: DependenciasDoOAuthService): OAuthServic
     };
   }
 
+  /**
+   * `password`: o cliente apresenta a credencial do usuário. Delega ao login por senha — que
+   * já tem hash fantasma, checagem de status, métrica e trilha — e injeta o rebaixamento ao
+   * escopo do cliente. O usuário é o sujeito; o cliente é o teto.
+   */
+  async function porSenha(
+    cliente: ClienteAutenticado,
+    pedido: PedidoDeToken,
+  ): Promise<TokenConcedido> {
+    if (!deps.passwordGrantHabilitado) {
+      throw new ErroDeOAuth('unsupported_grant_type');
+    }
+    if (pedido.username === undefined || pedido.password === undefined) {
+      throw new ErroDeOAuth('invalid_request', 'Informe username e password.');
+    }
+
+    // O escopo só é conhecido depois que as permissões do usuário são lidas, lá dentro do
+    // login; guardá-lo aqui evita devolver o par de tokens sem saber o que foi concedido.
+    let escopo = '';
+
+    try {
+      const par = await deps.authService.login(
+        { email: pedido.username, senha: pedido.password },
+        {
+          restringirAutoridade: (permissoesDoUsuario) => {
+            const concedido = calcularEscopoConcedido({
+              solicitados: pedido.escoposSolicitados,
+              escoposDoCliente: cliente.escopos,
+              autoridadeDoSujeito: permissoesDoUsuario,
+            });
+            escopo = formatarEscopo(concedido);
+            return { permissoes: concedido, escopo };
+          },
+          clientId: cliente.clientId,
+          ...(cliente.accessTokenTtlSegundos === null
+            ? {}
+            : { ttlSegundos: cliente.accessTokenTtlSegundos }),
+        },
+      );
+
+      return {
+        accessToken: par.accessToken,
+        tokenType: 'Bearer',
+        expiresIn: par.expiraEmSegundos,
+        scope: escopo,
+        refreshToken: par.refreshToken,
+      };
+    } catch (erro) {
+      // `invalid_scope` vem do rebaixamento e é erro de configuração — precisa chegar ao
+      // cliente como tal. Falha de credencial é sempre `invalid_grant`, o mesmo para usuário
+      // inexistente, senha errada e conta bloqueada.
+      if (erro instanceof ErroDeOAuth) {
+        throw erro;
+      }
+      throw new ErroDeOAuth('invalid_grant');
+    }
+  }
+
   return {
     async emitir(pedido: PedidoDeToken): Promise<TokenConcedido> {
       const cliente = await autorizarCliente(pedido);
 
       if (pedido.grantType === 'client_credentials') {
         return porCredenciaisDoCliente(cliente, pedido.escoposSolicitados);
+      }
+
+      if (pedido.grantType === 'password') {
+        return porSenha(cliente, pedido);
       }
 
       throw new ErroDeOAuth('unsupported_grant_type');

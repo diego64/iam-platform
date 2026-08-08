@@ -76,6 +76,11 @@ export interface OpcoesDeLogin {
   readonly restringirAutoridade?: (permissoesDoUsuario: readonly string[]) => AutoridadeConcedida;
   /** Sobrepõe o TTL global do access token (o do cliente, na emissão por OAuth). */
   readonly ttlSegundos?: number;
+  /**
+   * Cliente que pediu a emissão. Vai para o token e para o vínculo do refresh — sem ele, o
+   * refresh nasceria solto e nenhum cliente conseguiria renová-lo.
+   */
+  readonly clientId?: string;
 }
 
 export interface AuthService {
@@ -157,10 +162,16 @@ export function criarAuthService(deps: DependenciasDoAuthService): AuthService {
           roles,
           permissions: [...concedida.permissoes],
           scope: concedida.escopo,
+          ...(opcoes?.clientId === undefined ? {} : { clientId: opcoes.clientId }),
         },
         opcoes?.ttlSegundos === undefined ? undefined : { ttlSegundos: opcoes.ttlSegundos },
       );
-      const refreshToken = await deps.refreshToken.emitir(usuario.id);
+      const refreshToken = await deps.refreshToken.emitir(
+        usuario.id,
+        opcoes?.clientId === undefined
+          ? undefined
+          : { clientId: opcoes.clientId, escopo: concedida.escopo },
+      );
 
       medidor.contarSucesso();
       await auditoria.registrar({
