@@ -162,3 +162,70 @@ describe('debitar', () => {
     expect(medidor.contarErroDoContador).toHaveBeenCalledOnce();
   });
 });
+
+describe('trilha de auditoria', () => {
+  function comAuditoria(contagem: number): {
+    politica: ReturnType<typeof criarPoliticaDeRateLimit>;
+    registrar: ReturnType<typeof vi.fn>;
+  } {
+    const registrar = vi.fn(() => Promise.resolve());
+    return {
+      politica: criarPoliticaDeRateLimit({
+        contador: {
+          ler: () => Promise.resolve(estado(contagem)),
+          incrementar: () => Promise.resolve(estado(contagem)),
+        },
+        pepper: PEPPER,
+        auditoria: { registrar },
+        agora: () => AGORA,
+      }),
+      registrar,
+    };
+  }
+
+  it('o excesso entra na trilha com a dimensão', async () => {
+    const { politica, registrar } = comAuditoria(10);
+
+    await politica.verificar(CONSULTA);
+
+    expect(registrar).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'iam.rate_limit.exceeded',
+        outcome: 'failure',
+        metadata: { dimensao: 'conta', rota: '/auth/login' },
+      }),
+    );
+  });
+
+  it('na dimensão conta o e-mail vai como subjectEmail, não como ator', async () => {
+    // Quem deriva a pista com pepper é o serviço de auditoria: a trilha não guarda e-mail.
+    const { politica, registrar } = comAuditoria(10);
+
+    await politica.verificar(CONSULTA);
+
+    const evento = registrar.mock.calls[0]?.[0] as {
+      actor: { id: string | null };
+      subjectEmail?: string;
+    };
+    expect(evento.actor.id).toBeNull();
+    expect(evento.subjectEmail).toBe('admin@iam.local');
+  });
+
+  it('na dimensão cliente o client_id é o ator', async () => {
+    const { politica, registrar } = comAuditoria(10);
+
+    await politica.verificar({ ...CONSULTA, dimensao: 'cliente', valor: 'cli_abc' });
+
+    expect(registrar).toHaveBeenCalledWith(
+      expect.objectContaining({ actor: { id: 'cli_abc', type: 'client' } }),
+    );
+  });
+
+  it('requisição permitida não gera evento', async () => {
+    const { politica, registrar } = comAuditoria(1);
+
+    await politica.verificar(CONSULTA);
+
+    expect(registrar).not.toHaveBeenCalled();
+  });
+});

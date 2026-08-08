@@ -151,6 +151,8 @@ export interface DependenciasDaComposicao {
 export interface RateLimitDaAplicacao {
   readonly contador: ContadorDeRateLimit;
   readonly pepper: string;
+  /** Teto por IP estourado — a dimensão que o plugin decide sozinho. */
+  readonly aoExcederPorIp?: () => void;
 }
 
 export interface ModulosDaAplicacao {
@@ -315,6 +317,7 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
   const politicaDeLimite = criarPoliticaDeRateLimit({
     contador: contadorDeLimite,
     pepper: pepperDeLimite,
+    auditoria,
     ...(medidorDeLimite ? { medidor: medidorDeLimite } : {}),
     aoFalhar: ({ rota, dimensao }) => {
       logger.warn(
@@ -459,7 +462,21 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
         });
 
   return {
-    rateLimit: { contador: contadorDeLimite, pepper: pepperDeLimite },
+    rateLimit: {
+      contador: contadorDeLimite,
+      pepper: pepperDeLimite,
+      // A dimensão IP é decidida pelo plugin; o registro na trilha entra por aqui para os
+      // três excessos aparecerem no mesmo lugar.
+      aoExcederPorIp: () => {
+        medidorDeLimite?.contarBloqueio('*', 'ip');
+        void auditoria.registrar({
+          type: 'iam.rate_limit.exceeded',
+          actor: { id: null, type: 'system' },
+          outcome: 'failure',
+          metadata: { dimensao: 'ip' },
+        });
+      },
+    },
     auth: { authService, verificarAccessToken, limitePorConta },
     refresh: { refreshTokenService },
     oauth: { oauthService, limitePorCliente },

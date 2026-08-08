@@ -90,6 +90,8 @@ export interface RateLimitDoApp {
   readonly contador: ContadorDeRateLimit;
   readonly pepper: string;
   readonly aoFalhar?: () => void;
+  /** Teto por IP estourado — a dimensão que o plugin decide sozinho. */
+  readonly aoExcederPorIp?: () => void;
 }
 
 export interface DependenciasDoApp {
@@ -284,6 +286,9 @@ export async function construirApp(
           store: criarStoreDoPlugin({
             contador: dependencias.rateLimit.contador,
             pepper: dependencias.rateLimit.pepper,
+            aoExceder: () => {
+              dependencias.rateLimit?.aoExcederPorIp?.();
+            },
             aoFalhar: () => {
               dependencias.rateLimit?.aoFalhar?.();
               app.log.warn(

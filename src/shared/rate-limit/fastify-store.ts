@@ -35,6 +35,14 @@ export interface DependenciasDoStoreDoPlugin {
   readonly pepper: string;
   /** Chamado quando o contador falha — alimenta métrica e log. */
   readonly aoFalhar?: () => void;
+  /**
+   * Chamado quando o teto por IP estoura.
+   *
+   * A dimensão IP não passa pela política: quem decide barrar é o próprio plugin, comparando
+   * a contagem com o teto. O store aplica a mesma comparação para que o excesso apareça na
+   * trilha e na métrica pelo mesmo caminho das outras duas dimensões.
+   */
+  readonly aoExceder?: () => void;
 }
 
 export function criarStoreDoPlugin(
@@ -51,13 +59,17 @@ export function criarStoreDoPlugin(
   }
 
   return class StoreCompartilhado implements StoreDoPlugin {
-    incr(chave: string, retorno: RetornoDoStore, janelaMs: number): void {
+    incr(chave: string, retorno: RetornoDoStore, janelaMs: number, teto?: number): void {
       deps.contador
         .incrementar(chaveDe(chave), janelaMs)
         .then((estado) => {
           if (estado === null) {
             liberar(retorno, janelaMs);
             return;
+          }
+          // A mesma comparação que o plugin fará a seguir para responder 429.
+          if (teto !== undefined && estado.contagem > teto) {
+            deps.aoExceder?.();
           }
           retorno(null, {
             current: estado.contagem,

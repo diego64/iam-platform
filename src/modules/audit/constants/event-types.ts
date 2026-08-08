@@ -38,6 +38,7 @@ export const TIPOS_DE_EVENTO = [
   'iam.oauth.token_issued',
   'iam.oauth.token_denied',
   'iam.key.rotated',
+  'iam.rate_limit.exceeded',
 ] as const;
 
 export type TipoDeEvento = (typeof TIPOS_DE_EVENTO)[number];

@@ -13,6 +13,10 @@
  *  - O identificador nunca entra em log nem em métrica — só a rota e a dimensão.
  */
 import { derivarChave } from './chave.js';
+import {
+  registradorNulo,
+  type RegistradorDeAuditoria,
+} from '../../modules/audit/interfaces/audit-recorder.js';
 import { medidorDeRateLimitNulo, type MedidorDeRateLimit } from './rate-limit.metrics.js';
 import type { ContadorDeRateLimit, DimensaoDeLimite } from './types.js';
 
@@ -39,6 +43,8 @@ export interface DependenciasDaPolitica {
   readonly pepper: string;
   readonly medidor?: MedidorDeRateLimit;
   readonly aoFalhar?: (contexto: { rota: string; dimensao: DimensaoDeLimite }) => void;
+  /** Trilha de auditoria. Ausente, a política roda sem registrar — o padrão nos testes. */
+  readonly auditoria?: RegistradorDeAuditoria;
   /** Relógio injetável para teste; default `Date.now`. */
   readonly agora?: () => number;
 }
@@ -57,7 +63,29 @@ function liberado(teto: number): Veredito {
 
 export function criarPoliticaDeRateLimit(deps: DependenciasDaPolitica): PoliticaDeRateLimit {
   const medidor = deps.medidor ?? medidorDeRateLimitNulo();
+  const auditoria = deps.auditoria ?? registradorNulo();
   const agora = deps.agora ?? Date.now;
+
+  /**
+   * O ator do evento é o que se sabe sem revelar mais do que a resposta já revela.
+   *
+   * Na dimensão conta, o identificador é o e-mail: ele vai como `subjectEmail`, e quem
+   * deriva a pista com pepper é o serviço de auditoria — a trilha não guarda e-mail. Na
+   * dimensão cliente, o `client_id` é identificador de aplicação, não de pessoa, e vai
+   * direto. Na dimensão IP não há sujeito: o 429 acontece antes de qualquer identificação.
+   */
+  async function registrarExcesso(consulta: ConsultaDeLimite): Promise<void> {
+    await auditoria.registrar({
+      type: 'iam.rate_limit.exceeded',
+      actor:
+        consulta.dimensao === 'cliente'
+          ? { id: consulta.valor, type: 'client' }
+          : { id: null, type: consulta.dimensao === 'conta' ? 'user' : 'system' },
+      outcome: 'failure',
+      ...(consulta.dimensao === 'conta' ? { subjectEmail: consulta.valor } : {}),
+      metadata: { dimensao: consulta.dimensao, rota: consulta.rota },
+    });
+  }
 
   function chaveDe(consulta: ConsultaDeLimite): string {
     return derivarChave(consulta.dimensao, consulta.valor, deps.pepper);
@@ -94,6 +122,7 @@ export function criarPoliticaDeRateLimit(deps: DependenciasDaPolitica): Politica
 
       if (estado.contagem >= consulta.teto) {
         medidor.contarBloqueio(consulta.rota, consulta.dimensao);
+        await registrarExcesso(consulta);
         return {
           permitido: false,
           limite: consulta.teto,
