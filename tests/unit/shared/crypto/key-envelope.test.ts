@@ -1,10 +1,16 @@
 /**
- * Cobre o envelope de cifra da privada: round-trip cifra→decifra, salt por chamada, e a
- * falha alta quando a tag GCM é adulterada ou a MASTER_KEY está errada.
+ * Cobre o envelope de cifra: round-trip cifra→decifra (de chave privada e de segredo
+ * qualquer), salt por chamada, e a falha alta quando a tag GCM é adulterada ou a
+ * MASTER_KEY está errada.
  */
 import { describe, expect, it } from 'vitest';
-import { generateKeyPairSync } from 'node:crypto';
-import { cifrarPrivada, decifrarPrivada } from '../../../../src/shared/crypto/key-envelope.js';
+import { generateKeyPairSync, randomBytes } from 'node:crypto';
+import {
+  cifrarPrivada,
+  cifrarSegredo,
+  decifrarPrivada,
+  decifrarSegredo,
+} from '../../../../src/shared/crypto/key-envelope.js';
 
 const MASTER = 'chave-mestra-de-teste-com-32-bytes!!';
 
@@ -49,5 +55,27 @@ describe('cifrarPrivada / decifrarPrivada', () => {
 
   it('rejeita blob curto demais para conter o cabeçalho', () => {
     expect(() => decifrarPrivada(Buffer.alloc(10), MASTER)).toThrow();
+  });
+});
+
+describe('cifrarSegredo / decifrarSegredo', () => {
+  it('ida e volta preserva bytes arbitrários', () => {
+    // O MFA cifra um segredo TOTP de 20 bytes, não uma chave PKCS#8 — o envelope precisa
+    // valer para qualquer conteúdo.
+    for (const tamanho of [1, 20, 32, 256]) {
+      const segredo = randomBytes(tamanho);
+      expect(decifrarSegredo(cifrarSegredo(segredo, MASTER), MASTER).equals(segredo)).toBe(true);
+    }
+  });
+
+  it('MASTER_KEY errada falha alto em vez de devolver lixo', () => {
+    const blob = cifrarSegredo(randomBytes(20), MASTER);
+
+    expect(() => decifrarSegredo(blob, 'outra-master-key-com-mais-de-32-bytes')).toThrow();
+  });
+
+  it('os nomes antigos continuam apontando para a mesma função', () => {
+    expect(cifrarPrivada).toBe(cifrarSegredo);
+    expect(decifrarPrivada).toBe(decifrarSegredo);
   });
 });
