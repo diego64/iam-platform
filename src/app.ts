@@ -10,6 +10,7 @@ import fastifySwagger from '@fastify/swagger';
 import fastifySwaggerUi from '@fastify/swagger-ui';
 import fastifyRateLimit from '@fastify/rate-limit';
 import { criarStoreDoPlugin } from './shared/rate-limit/fastify-store.js';
+import { ehExcessoDeRateLimit, problemaDeRateLimit } from './shared/rate-limit/resposta-429.js';
 import type { ContadorDeRateLimit } from './shared/rate-limit/types.js';
 import fastifyHelmet from '@fastify/helmet';
 import fastifyCors from '@fastify/cors';
@@ -314,6 +315,13 @@ export async function construirApp(
         .status(400)
         .type(TIPO_PROBLEM_JSON)
         .send(montarProblema('validation-error', 'Requisição inválida', 400));
+      return;
+    }
+
+    // O plugin de rate limit lança um erro com `statusCode` 429; sem este ramo ele cairia
+    // no genérico e sairia como `request-error`, indistinguível de qualquer outro 4xx.
+    if (ehExcessoDeRateLimit(erro)) {
+      void resposta.status(429).type(TIPO_PROBLEM_JSON).send(problemaDeRateLimit());
       return;
     }
 
