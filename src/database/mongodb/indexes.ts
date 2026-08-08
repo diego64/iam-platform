@@ -30,6 +30,12 @@ export async function garantirIndices(banco: Db): Promise<void> {
     { key: { token_hash: 1 }, unique: true },
     { key: { expires_at: 1 }, expireAfterSeconds: 0 }, // TTL
   ]);
+  // Contadores de rate limit. A chave é o próprio `_id` (único e indexado por construção),
+  // então o único índice a criar é o TTL: sem ele a coleção cresceria para sempre guardando
+  // janelas que ninguém mais consulta.
+  await banco
+    .collection('rate_limit_counters')
+    .createIndexes([{ key: { expires_at: 1 }, expireAfterSeconds: 0 }]);
   // Trilha de auditoria. `seq` único é o que denuncia buraco na cadeia, e `event_id` único
   // torna a reemissão do mesmo evento inofensiva. Os três índices de consulta cobrem os
   // filtros da leitura (tipo, ator, alvo), sempre com recorte por tempo.
