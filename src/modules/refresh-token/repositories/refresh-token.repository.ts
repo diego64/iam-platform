@@ -25,6 +25,10 @@ export interface RefreshPersistido {
   readonly rotatedAt: Date | null;
   readonly idleExpiresAt: Date;
   readonly absoluteExpiresAt: Date;
+  /** Cliente dono da família; `null` quando o token nasceu no login por senha. */
+  readonly clientId: string | null;
+  /** Escopo concedido na emissão. A rotação não pode ampliá-lo (RFC 6749 §6). */
+  readonly escopo: string | null;
 }
 
 export interface EntradaDeRegistro {
@@ -33,6 +37,8 @@ export interface EntradaDeRegistro {
   readonly userId: string;
   readonly idleExpiresAt: Date;
   readonly absoluteExpiresAt: Date;
+  readonly clientId?: string | null;
+  readonly escopo?: string | null;
 }
 
 export interface RepositorioDeRefreshToken {
@@ -65,6 +71,10 @@ interface LinhaMongo {
   readonly idle_expires_at: Date;
   readonly absolute_expires_at: Date;
   readonly expires_at: Date;
+  // Opcionais na leitura: documento gravado antes do vínculo com cliente não tem os campos,
+  // e ausente é lido como `null` — o que o mantém resgatável só por `/auth/refresh`.
+  readonly client_id?: string | null;
+  readonly scope?: string | null;
 }
 
 function paraDominio(linha: LinhaMongo): RefreshPersistido {
@@ -75,6 +85,8 @@ function paraDominio(linha: LinhaMongo): RefreshPersistido {
     rotatedAt: linha.rotated_at,
     idleExpiresAt: linha.idle_expires_at,
     absoluteExpiresAt: linha.absolute_expires_at,
+    clientId: linha.client_id ?? null,
+    escopo: linha.scope ?? null,
   };
 }
 
@@ -93,6 +105,8 @@ export function criarRepositorioDeRefreshToken(banco: Db): RepositorioDeRefreshT
         idle_expires_at: entrada.idleExpiresAt,
         absolute_expires_at: entrada.absoluteExpiresAt,
         expires_at: entrada.absoluteExpiresAt,
+        client_id: entrada.clientId ?? null,
+        scope: entrada.escopo ?? null,
       });
     },
 

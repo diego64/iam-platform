@@ -39,10 +39,7 @@ export function setup() {
   }
 }
 
-/**
- * Troca o par por um token. Enquanto a emissão OAuth2 não existir, aponte BASE_URL para o
- * harness local que expõe o serviço de autenticação de cliente.
- */
+/** Troca o par por um token pelo grant `client_credentials`. */
 function trocarPorToken(secret) {
   return http.post(
     `${BASE}/oauth/token`,

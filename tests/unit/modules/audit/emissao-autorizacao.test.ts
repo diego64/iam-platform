@@ -95,6 +95,8 @@ describe('rotação de refresh token', () => {
     rotatedAt: Date | null;
     idleExpiresAt: Date;
     absoluteExpiresAt: Date;
+    clientId: string | null;
+    escopo: string | null;
   } {
     return {
       tokenHash: 'hash',
@@ -104,6 +106,8 @@ describe('rotação de refresh token', () => {
       rotatedAt: null,
       idleExpiresAt: new Date(AGORA + 60_000),
       absoluteExpiresAt: new Date(AGORA + 600_000),
+      clientId: null,
+      escopo: null,
     };
   }
 

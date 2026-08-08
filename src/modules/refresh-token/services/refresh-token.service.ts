@@ -17,7 +17,11 @@ import { medidorDeRefreshNulo, type MedidorDeRefresh } from '../metrics/refresh.
 import type { RepositorioDeRefreshToken } from '../repositories/refresh-token.repository.js';
 import type { RepositorioDeAutenticacao } from '../../auth/repositories/auth-user.repository.js';
 import type { TokenService } from '../../auth/services/token.service.js';
-import type { PortaDeRefreshToken } from '../../auth/interfaces/refresh-token.port.js';
+import type { AutoridadeConcedida } from '../../auth/services/auth.service.js';
+import type {
+  ContextoDeEmissao,
+  PortaDeRefreshToken,
+} from '../../auth/interfaces/refresh-token.port.js';
 import type { ParDeTokens } from '../../auth/types/auth.types.js';
 import { uuidv7 } from '../../../shared/crypto/uuidv7.js';
 import {
@@ -46,9 +50,30 @@ export interface DependenciasDoRefreshTokenService {
   readonly auditoria?: RegistradorDeAuditoria;
 }
 
+export interface OpcoesDeRotacao {
+  /**
+   * Quem está resgatando o token. `null` (o default) é o `/auth/refresh` público, e só casa
+   * com token que nasceu sem cliente. Descasamento recusa **sem** derrubar a família:
+   * revogar daria a qualquer cliente autenticado uma arma contra a sessão alheia, e o
+   * descasamento também acontece por erro honesto de integração.
+   */
+  readonly clientIdEsperado?: string | null;
+  /**
+   * Recorta a autoridade do token reemitido, recebendo também o escopo concedido na emissão
+   * original — a RFC 6749 §6 proíbe a renovação ampliar o que foi concedido, e sem o valor
+   * original não há como verificar. Mesmo contrato do recorte do login.
+   */
+  readonly restringirAutoridade?: (entrada: {
+    readonly permissoesDoUsuario: readonly string[];
+    readonly escopoOriginal: string | null;
+  }) => AutoridadeConcedida;
+  /** Sobrepõe o TTL global do access token (o do cliente, na emissão por OAuth). */
+  readonly ttlSegundos?: number;
+}
+
 export interface RefreshTokenService extends PortaDeRefreshToken {
   /** Troca um refresh token válido por um novo par (access + refresh). Lança em qualquer falha. */
-  rotacionar(refreshToken: string): Promise<ParDeTokens>;
+  rotacionar(refreshToken: string, opcoes?: OpcoesDeRotacao): Promise<ParDeTokens>;
 }
 
 export function criarRefreshTokenService(
@@ -63,6 +88,7 @@ export function criarRefreshTokenService(
     userId: string,
     familyId: string,
     absoluteExpiresAt: Date,
+    vinculo: ContextoDeEmissao = {},
   ): Promise<string> {
     const token = gerarTokenOpaco();
     await deps.repo.registrar({
@@ -71,15 +97,17 @@ export function criarRefreshTokenService(
       userId,
       idleExpiresAt: new Date(Date.now() + deps.ttlIdleMs),
       absoluteExpiresAt,
+      clientId: vinculo.clientId ?? null,
+      escopo: vinculo.escopo ?? null,
     });
     return token;
   }
 
   return {
-    async emitir(userId: string): Promise<string> {
+    async emitir(userId: string, contexto?: ContextoDeEmissao): Promise<string> {
       const familyId = uuidv7();
       const absoluteExpiresAt = new Date(Date.now() + deps.ttlAbsolutoMs);
-      return persistirNovo(userId, familyId, absoluteExpiresAt);
+      return persistirNovo(userId, familyId, absoluteExpiresAt, contexto ?? {});
     },
 
     async revogar(refreshToken: string): Promise<void> {
@@ -90,7 +118,7 @@ export function criarRefreshTokenService(
       await deps.repo.revogarFamilia(doc.familyId);
     },
 
-    async rotacionar(refreshToken: string): Promise<ParDeTokens> {
+    async rotacionar(refreshToken: string, opcoes?: OpcoesDeRotacao): Promise<ParDeTokens> {
       const inicio = Date.now();
       const hash = digerirToken(refreshToken);
       const agora = new Date();
@@ -106,6 +134,15 @@ export function criarRefreshTokenService(
       if (doc === null) {
         medidor.contarFalha('nao_encontrado');
         throw new ErroDeRefreshInvalido('nao_encontrado');
+      }
+
+      // Antes de qualquer efeito: um token de outro dono não autoriza nada, nem a detecção
+      // de reuso. Agir sobre a família alheia com base em quem apenas apresentou o token é
+      // exatamente a alavanca que um cliente hostil usaria para derrubar sessões de outro.
+      const clienteEsperado = opcoes?.clientIdEsperado ?? null;
+      if (doc.clientId !== clienteEsperado) {
+        medidor.contarFalha('cliente_divergente');
+        throw new ErroDeRefreshInvalido('cliente_divergente');
       }
 
       if (doc.status !== 'active') {
@@ -163,13 +200,26 @@ export function criarRefreshTokenService(
         deps.usuarios.papeisDoUsuario(doc.userId),
         deps.usuarios.permissoesEfetivas(doc.userId),
       ]);
-      const emitido = await deps.tokenService.emitir({
-        sub: doc.userId,
-        roles,
-        permissions,
-        scope,
+      const concedida: AutoridadeConcedida = opcoes?.restringirAutoridade?.({
+        permissoesDoUsuario: permissions,
+        escopoOriginal: doc.escopo,
+      }) ?? { permissoes: permissions, escopo: scope };
+      const emitido = await deps.tokenService.emitir(
+        {
+          sub: doc.userId,
+          roles,
+          permissions: [...concedida.permissoes],
+          scope: concedida.escopo,
+          ...(doc.clientId === null ? {} : { clientId: doc.clientId }),
+        },
+        opcoes?.ttlSegundos === undefined ? undefined : { ttlSegundos: opcoes.ttlSegundos },
+      );
+      // O sucessor herda o vínculo e o escopo: a família inteira mantém o mesmo dono e o
+      // mesmo teto de autoridade do primeiro token.
+      const novoRefresh = await persistirNovo(doc.userId, doc.familyId, doc.absoluteExpiresAt, {
+        clientId: doc.clientId,
+        escopo: opcoes?.restringirAutoridade === undefined ? doc.escopo : concedida.escopo,
       });
-      const novoRefresh = await persistirNovo(doc.userId, doc.familyId, doc.absoluteExpiresAt);
 
       medidor.contarRotacao();
       medidor.observarDuracao((Date.now() - inicio) / 1000);

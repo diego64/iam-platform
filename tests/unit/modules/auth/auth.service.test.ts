@@ -148,6 +148,62 @@ describe('login', () => {
     expect(contarFalha).toHaveBeenCalledWith('bloqueado');
     expect(emitir).not.toHaveBeenCalled();
   });
+
+  it('sem recorte, o token leva a autoridade inteira e o escopo padrão', async () => {
+    const { service, emitir } = montar(
+      { id: 'u1', email: 'a@iam.local', status: 'active', roles: ['admin'] },
+      {
+        repo: {
+          ...repoFake({ id: 'u1', email: 'a@iam.local', status: 'active', roles: ['admin'] }),
+          permissoesEfetivas: () => Promise.resolve(['*']),
+        },
+        scopePadrao: 'leitura',
+      },
+    );
+
+    await service.login({ email: 'a@iam.local', senha: 'correta' });
+
+    expect(emitir).toHaveBeenCalledWith(
+      expect.objectContaining({ permissions: ['*'], scope: 'leitura' }),
+      undefined,
+    );
+  });
+
+  it('o recorte de autoridade rebaixa as permissões e o escopo do token', async () => {
+    // O cenário que a emissão por OAuth precisa: superadmin autenticando por um cliente que
+    // só tem `orders:read` sai com um token de `orders:read`, não com o curinga.
+    const { service, emitir } = montar(
+      { id: 'u1', email: 'a@iam.local', status: 'active', roles: ['superadmin'] },
+      {
+        repo: {
+          ...repoFake({ id: 'u1', email: 'a@iam.local', status: 'active', roles: ['superadmin'] }),
+          permissoesEfetivas: () => Promise.resolve(['*']),
+        },
+      },
+    );
+
+    const par = await service.login(
+      { email: 'a@iam.local', senha: 'correta' },
+      {
+        restringirAutoridade: (permissoes) => {
+          expect(permissoes).toEqual(['*']);
+          return { permissoes: ['orders:read'], escopo: 'orders:read' };
+        },
+        ttlSegundos: 120,
+      },
+    );
+
+    expect(emitir).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sub: 'u1',
+        roles: ['superadmin'],
+        permissions: ['orders:read'],
+        scope: 'orders:read',
+      }),
+      { ttlSegundos: 120 },
+    );
+    expect(par.accessToken).toBe('jwt-abc');
+  });
 });
 
 describe('logout', () => {

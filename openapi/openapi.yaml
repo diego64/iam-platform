@@ -42,6 +42,13 @@ tags:
     description: >-
       Políticas por atributo sobre o RBAC. A decisão é sempre server-side (PDP/PEP) e nunca
       entra no token: uma condição sobre o recurso precisa do recurso em mãos.
+  - name: oauth
+    description: >-
+      Superfície OAuth 2.0 (RFC 6749). O corpo é form-urlencoded e o erro segue o formato da
+      própria RFC, não o problem+json do resto da plataforma: nenhuma biblioteca cliente de
+      OAuth lê problem+json. A autoridade do token emitido é a interseção do que foi pedido,
+      do que o cliente tem e do que o sujeito tem — um cliente nunca emite token com mais
+      permissão do que ele próprio possui.
 servers:
   - url: http://localhost:3000
     description: Desenvolvimento local
@@ -105,6 +112,113 @@ components:
           enum: [Bearer]
         expires_in:
           type: integer
+    TokenRequest:
+      type: object
+      # Sem `additionalProperties: false`: a RFC 6749 §3.2 manda ignorar parâmetro
+      # desconhecido, e cliente pronto manda extras (`audience`, `resource`).
+      required: [grant_type]
+      properties:
+        grant_type:
+          type: string
+          description: >-
+            `client_credentials`, `password` ou `refresh_token`. Valor fora dessa lista
+            responde `unsupported_grant_type`.
+          maxLength: 64
+        scope:
+          type: string
+          description: Nomes de permissão separados por espaço (`orders:read orders:write`).
+          maxLength: 2048
+        client_id:
+          type: string
+          maxLength: 128
+        client_secret:
+          type: string
+          maxLength: 256
+        username:
+          type: string
+          maxLength: 254
+        password:
+          type: string
+          maxLength: 128
+        refresh_token:
+          type: string
+          maxLength: 512
+    TokenResponse:
+      type: object
+      additionalProperties: false
+      required: [access_token, token_type, expires_in, scope]
+      properties:
+        access_token:
+          type: string
+        token_type:
+          type: string
+          enum: [Bearer]
+        expires_in:
+          type: integer
+        scope:
+          type: string
+          description: >-
+            Escopo efetivamente concedido, que pode ser menor que o solicitado quando o
+            sujeito tem menos autoridade que o cliente (RFC 6749 §5.1).
+        refresh_token:
+          type: string
+          description: Ausente em `client_credentials` (RFC 6749 §4.4.3).
+    OAuthError:
+      type: object
+      additionalProperties: false
+      required: [error, error_description]
+      properties:
+        error:
+          type: string
+          enum:
+            - invalid_request
+            - invalid_client
+            - invalid_grant
+            - unauthorized_client
+            - unsupported_grant_type
+            - invalid_scope
+            - slow_down
+            - server_error
+        error_description:
+          type: string
+    AuthorizationServerMetadata:
+      type: object
+      additionalProperties: false
+      required:
+        - issuer
+        - token_endpoint
+        - jwks_uri
+        - grant_types_supported
+        - token_endpoint_auth_methods_supported
+        - response_types_supported
+        - scopes_supported
+      properties:
+        issuer:
+          type: string
+          format: uri
+        token_endpoint:
+          type: string
+          format: uri
+        jwks_uri:
+          type: string
+          format: uri
+        grant_types_supported:
+          type: array
+          items:
+            type: string
+        token_endpoint_auth_methods_supported:
+          type: array
+          items:
+            type: string
+        response_types_supported:
+          type: array
+          description: Vazio — sem `authorization_code`, não há response type.
+          items:
+            type: string
+        scopes_supported:
+          type: array
+          items:
+            type: string
     LogoutRequest:
       type: object
       additionalProperties: false
@@ -1149,6 +1263,69 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+  /oauth/token:
+    post:
+      tags: [oauth]
+      summary: Emite um access token pelos grants da RFC 6749
+      description: >
+        Corpo em `application/x-www-form-urlencoded`; corpo JSON responde `invalid_request`.
+        O cliente autentica por `Authorization: Basic` ou pelos campos `client_id`/
+        `client_secret` no corpo — usar os dois na mesma requisição é `invalid_request`.
+        Toda resposta traz `Cache-Control: no-store`. O erro segue a RFC 6749 §5.2, não o
+        problem+json do resto da plataforma.
+      operationId: oauthToken
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TokenRequest'
+      responses:
+        '200':
+          description: Token emitido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400':
+          description: >-
+            `invalid_request`, `invalid_grant`, `unauthorized_client`,
+            `unsupported_grant_type` ou `invalid_scope`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+        '401':
+          description: >-
+            `invalid_client` — resposta única para cliente inexistente, removido,
+            desabilitado ou com segredo errado. Acompanha `WWW-Authenticate: Basic`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+        '429':
+          description: '`slow_down` — rate limit excedido'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+  /.well-known/oauth-authorization-server:
+    get:
+      tags: [oauth]
+      summary: Metadados do servidor de autorização (RFC 8414)
+      description: >
+        Descreve o que o servidor faz agora: com o `password` grant desligado, ele não
+        aparece em `grant_types_supported`.
+      operationId: oauthMetadata
+      security: []
+      responses:
+        '200':
+          description: Documento de metadados
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizationServerMetadata'
   /auth/refresh:
     post:
       tags: [auth]

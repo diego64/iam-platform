@@ -54,8 +54,37 @@ export interface DependenciasDoAuthService {
   readonly auditoria?: RegistradorDeAuditoria;
 }
 
+/** Autoridade final do token, depois de qualquer recorte de quem pediu a emissão. */
+export interface AutoridadeConcedida {
+  readonly permissoes: readonly string[];
+  /** Formato da claim `scope`: nomes separados por espaço. */
+  readonly escopo: string;
+}
+
+export interface OpcoesDeLogin {
+  /**
+   * Recorta a autoridade do token a partir das permissões efetivas do usuário.
+   *
+   * Existe para a emissão por OAuth rebaixar o token ao escopo do cliente sem que este
+   * serviço precise conhecer cliente, escopo ou protocolo: ele entrega as permissões e
+   * recebe de volta o que vai no token. O login por senha não passa nada e o usuário sai
+   * com tudo o que tem — o comportamento de sempre.
+   *
+   * Quem precisa saber o que foi concedido guarda o resultado no próprio recorte; por isso
+   * o par de tokens devolvido continua com a forma de antes desta SPEC.
+   */
+  readonly restringirAutoridade?: (permissoesDoUsuario: readonly string[]) => AutoridadeConcedida;
+  /** Sobrepõe o TTL global do access token (o do cliente, na emissão por OAuth). */
+  readonly ttlSegundos?: number;
+  /**
+   * Cliente que pediu a emissão. Vai para o token e para o vínculo do refresh — sem ele, o
+   * refresh nasceria solto e nenhum cliente conseguiria renová-lo.
+   */
+  readonly clientId?: string;
+}
+
 export interface AuthService {
-  login(credenciais: Credenciais): Promise<ParDeTokens>;
+  login(credenciais: Credenciais, opcoes?: OpcoesDeLogin): Promise<ParDeTokens>;
   logout(dados: DadosDeLogout): Promise<void>;
   perfil(userId: string): Promise<PerfilDoUsuario | null>;
 }
@@ -83,7 +112,7 @@ export function criarAuthService(deps: DependenciasDoAuthService): AuthService {
   }
 
   return {
-    async login(credenciais: Credenciais): Promise<ParDeTokens> {
+    async login(credenciais: Credenciais, opcoes?: OpcoesDeLogin): Promise<ParDeTokens> {
       const usuario = await deps.repo.buscarPorEmail(credenciais.email);
 
       if (usuario === null) {
@@ -122,13 +151,32 @@ export function criarAuthService(deps: DependenciasDoAuthService): AuthService {
         deps.repo.papeisDoUsuario(usuario.id),
         deps.repo.permissoesEfetivas(usuario.id),
       ]);
-      const emitido = await deps.tokenService.emitir({
-        sub: usuario.id,
-        roles,
-        permissions,
-        scope,
-      });
-      const refreshToken = await deps.refreshToken.emitir(usuario.id);
+      // Sem recorte, o token carrega a autoridade inteira do usuário e o escopo padrão.
+      const concedida: AutoridadeConcedida = opcoes?.restringirAutoridade?.(permissions) ?? {
+        permissoes: permissions,
+        escopo: scope,
+      };
+      const emitido = await deps.tokenService.emitir(
+        {
+          sub: usuario.id,
+          roles,
+          permissions: [...concedida.permissoes],
+          scope: concedida.escopo,
+          // `sub_type` só aparece quando a emissão passou por um cliente: um consumidor que
+          // recebe token de duas origens precisa saber que ali há uma pessoa por trás. O
+          // token do login por senha continua sem a claim.
+          ...(opcoes?.clientId === undefined
+            ? {}
+            : { clientId: opcoes.clientId, subType: 'user' as const }),
+        },
+        opcoes?.ttlSegundos === undefined ? undefined : { ttlSegundos: opcoes.ttlSegundos },
+      );
+      const refreshToken = await deps.refreshToken.emitir(
+        usuario.id,
+        opcoes?.clientId === undefined
+          ? undefined
+          : { clientId: opcoes.clientId, escopo: concedida.escopo },
+      );
 
       medidor.contarSucesso();
       await auditoria.registrar({

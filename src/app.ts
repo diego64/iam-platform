@@ -32,6 +32,7 @@ import type { ModulosDaAplicacao } from './bootstrap/composicao.js';
 import type { VerificadorDeAccessToken } from './modules/auth/index.js';
 import { registrarRotasDeAuth } from './modules/auth/index.js';
 import { registrarRotasDeRefresh } from './modules/refresh-token/index.js';
+import { registrarRotasDeMetadados, registrarRotasDeOAuth } from './modules/oauth/index.js';
 import { registrarRotasDeSenha } from './modules/password/index.js';
 import type { DependenciasDoController as DependenciasDeSenha } from './modules/password/index.js';
 import { registrarRotasDeUsuario } from './modules/users/index.js';
@@ -328,6 +329,10 @@ export async function construirApp(
   if (modulos !== undefined) {
     registrarRotasDeAuth(app, modulos.auth);
     registrarRotasDeRefresh(app, modulos.refresh);
+    // O endpoint de token vive num escopo encapsulado (formulário e erro da RFC 6749); os
+    // metadados ficam fora dele, porque são JSON público.
+    await registrarRotasDeOAuth(app, modulos.oauth);
+    registrarRotasDeMetadados(app, modulos.metadadosDeOAuth);
     await registrarModuloDeSenha(app, modulos.senha, modulos.auth.verificarAccessToken);
     await registrarModuloDeUsuarios(app, modulos.users, modulos.auth.verificarAccessToken);
     registrarRotasDeRbac(app, modulos.rbac);

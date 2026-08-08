@@ -220,6 +220,13 @@ export const esquemaEnv = z.object({
     .max(5 * 60 * 1000)
     .default(10_000),
 
+  // Interruptor global do grant `password` (ROPC). O OAuth 2.1 o remove, porque ele não
+  // comporta consentimento nem desafio interativo; aqui ele existe para a aplicação de
+  // confiança que já manipula a senha do usuário. A trava fina é por cliente
+  // (`api_clients.grant_types`); esta é a que desliga o grant inteiro em incidente, sem
+  // deploy e sem tocar em cliente nenhum.
+  OAUTH_PASSWORD_GRANT_ENABLED: booleanoDeAmbiente(true),
+
   // Janela padrão em que o segredo anterior de um cliente continua aceito depois da
   // rotação. Existe porque trocar o segredo de um serviço em produção envolve deploy: com a
   // troca atômica, haveria um intervalo em que as réplicas antigas já não autenticam.

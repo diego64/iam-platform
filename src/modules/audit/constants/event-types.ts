@@ -29,6 +29,8 @@ export const TIPOS_DE_EVENTO = [
   'iam.session.revoked',
   'iam.client.created',
   'iam.client.secret_rotated',
+  'iam.oauth.token_issued',
+  'iam.oauth.token_denied',
   'iam.key.rotated',
 ] as const;
 
