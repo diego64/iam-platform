@@ -45,6 +45,18 @@ export const respostaDeToken = z
   })
   .strict();
 
+export const metadadosDoServidor = z
+  .object({
+    issuer: z.string().url(),
+    token_endpoint: z.string().url(),
+    jwks_uri: z.string().url(),
+    grant_types_supported: z.array(z.string()),
+    token_endpoint_auth_methods_supported: z.array(z.string()),
+    response_types_supported: z.array(z.string()),
+    scopes_supported: z.array(z.string()),
+  })
+  .strict();
+
 /** Erro no formato da RFC 6749 §5.2 — declarado para o OpenAPI, não para validar entrada. */
 export const erroDeOAuth = z
   .object({
