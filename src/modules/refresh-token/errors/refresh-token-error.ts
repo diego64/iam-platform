@@ -6,7 +6,8 @@
  *
  * `corrida` é a rotação concorrente legítima (duas abas / retry): benigna, não derruba a
  * família. `reuso` é o replay de um token já rotacionado fora da janela de graça: indício de
- * roubo, derruba a família inteira.
+ * roubo, derruba a família inteira. `cliente_divergente` é o token apresentado por quem não é
+ * o dono da família — recusado antes de qualquer efeito, sem derrubar nada.
  */
 export type MotivoDeRefreshInvalido =
   | 'nao_encontrado'
@@ -15,6 +16,7 @@ export type MotivoDeRefreshInvalido =
   | 'reuso'
   | 'corrida'
   | 'usuario_bloqueado'
+  | 'cliente_divergente'
   | 'indisponivel';
 
 export class ErroDeRefreshInvalido extends Error {

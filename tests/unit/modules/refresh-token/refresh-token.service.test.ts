@@ -43,6 +43,9 @@ function docAtivo(sobrescritas: Partial<RefreshPersistido> = {}): RefreshPersist
     rotatedAt: null,
     idleExpiresAt: new Date(agora + 60_000),
     absoluteExpiresAt: new Date(agora + 3_600_000),
+    // Documento do login por senha: sem dono e sem escopo gravado.
+    clientId: null,
+    escopo: null,
     ...sobrescritas,
   };
 }
@@ -186,6 +189,96 @@ describe('rotacionar', () => {
     buscarPorHash.mockRejectedValueOnce(new Error('mongo indisponível'));
 
     await expect(service.rotacionar('t')).rejects.toMatchObject({ motivo: 'indisponivel' });
+  });
+});
+
+describe('vínculo com o cliente', () => {
+  it('grava o dono e o escopo quando a emissão vem de um cliente', async () => {
+    const { service, registrar } = montar();
+
+    await service.emitir('u1', { clientId: 'cli_a', escopo: 'orders:read' });
+
+    expect(registrar.mock.calls[0]?.[0]).toMatchObject({
+      clientId: 'cli_a',
+      escopo: 'orders:read',
+    });
+  });
+
+  it('emissão sem contexto grava o token sem dono', async () => {
+    const { service, registrar } = montar();
+
+    await service.emitir('u1');
+
+    expect(registrar.mock.calls[0]?.[0]).toMatchObject({ clientId: null, escopo: null });
+  });
+
+  it('recusa o token de um cliente quando quem resgata é outro', async () => {
+    const { service, buscarPorHash, revogarFamilia, rotacionarAtomico } = montar();
+    buscarPorHash.mockResolvedValueOnce(docAtivo({ clientId: 'cli_a' }));
+
+    await expect(service.rotacionar('t', { clientIdEsperado: 'cli_b' })).rejects.toMatchObject({
+      motivo: 'cliente_divergente',
+    });
+    // Não derruba a família: revogar daria a qualquer cliente autenticado uma alavanca
+    // contra a sessão alheia, bastando apresentar um token que ele não deveria ter.
+    expect(revogarFamilia).not.toHaveBeenCalled();
+    expect(rotacionarAtomico).not.toHaveBeenCalled();
+  });
+
+  it('recusa em /auth/refresh o token que nasceu num cliente', async () => {
+    const { service, buscarPorHash } = montar();
+    buscarPorHash.mockResolvedValueOnce(docAtivo({ clientId: 'cli_a' }));
+
+    await expect(service.rotacionar('t')).rejects.toMatchObject({ motivo: 'cliente_divergente' });
+  });
+
+  it('recusa no cliente o token que nasceu no login por senha', async () => {
+    const { service } = montar();
+
+    await expect(service.rotacionar('t', { clientIdEsperado: 'cli_a' })).rejects.toMatchObject({
+      motivo: 'cliente_divergente',
+    });
+  });
+
+  it('o sucessor herda o dono e o escopo da família', async () => {
+    const { service, buscarPorHash, rotacionarAtomico, registrar } = montar();
+    const doc = docAtivo({ clientId: 'cli_a', escopo: 'orders:read' });
+    buscarPorHash.mockResolvedValueOnce(doc);
+    rotacionarAtomico.mockResolvedValueOnce(doc);
+
+    await service.rotacionar('t', { clientIdEsperado: 'cli_a' });
+
+    expect(registrar.mock.calls[0]?.[0]).toMatchObject({
+      clientId: 'cli_a',
+      escopo: 'orders:read',
+    });
+  });
+
+  it('o recorte de autoridade recebe o escopo original e manda no token reemitido', async () => {
+    const { service, buscarPorHash, rotacionarAtomico, emitir, registrar } = montar();
+    const doc = docAtivo({ clientId: 'cli_a', escopo: 'orders:read orders:write' });
+    buscarPorHash.mockResolvedValueOnce(doc);
+    rotacionarAtomico.mockResolvedValueOnce(doc);
+
+    await service.rotacionar('t', {
+      clientIdEsperado: 'cli_a',
+      restringirAutoridade: (entrada) => {
+        expect(entrada.escopoOriginal).toBe('orders:read orders:write');
+        expect(entrada.permissoesDoUsuario).toEqual(['users:read']);
+        return { permissoes: ['orders:read'], escopo: 'orders:read' };
+      },
+      ttlSegundos: 120,
+    });
+
+    expect(emitir).toHaveBeenCalledWith(
+      expect.objectContaining({
+        permissions: ['orders:read'],
+        scope: 'orders:read',
+        clientId: 'cli_a',
+      }),
+      { ttlSegundos: 120 },
+    );
+    expect(registrar.mock.calls[0]?.[0]).toMatchObject({ escopo: 'orders:read' });
   });
 });
 

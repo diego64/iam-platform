@@ -13,7 +13,11 @@ const ESCOPO = 'iam-platform';
 
 /** Por que a rotação falhou — genérico, nunca revela o dono do token. */
 export type MotivoDeFalhaDeRefresh =
-  'nao_encontrado' | 'idle_expirado' | 'absoluto_expirado' | 'usuario_bloqueado';
+  | 'nao_encontrado'
+  | 'idle_expirado'
+  | 'absoluto_expirado'
+  | 'usuario_bloqueado'
+  | 'cliente_divergente';
 
 const FRONTEIRAS_SEGUNDOS = [0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25];
 
