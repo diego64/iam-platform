@@ -23,6 +23,13 @@ export async function garantirIndices(banco: Db): Promise<void> {
     { key: { expires_at: 1 }, expireAfterSeconds: 0 }, // TTL
     { key: { user_id: 1 } },
   ]);
+  // Desafios de MFA — o estado do login que parou entre a senha e o segundo fator. Só o
+  // sha256 do token opaco é gravado. TTL curto: um desafio que ninguém respondeu não deve
+  // sobreviver ao intervalo em que a pessoa ainda está na tela.
+  await banco.collection('mfa_challenges').createIndexes([
+    { key: { token_hash: 1 }, unique: true },
+    { key: { expires_at: 1 }, expireAfterSeconds: 0 }, // TTL
+  ]);
   // Trilha de auditoria. `seq` único é o que denuncia buraco na cadeia, e `event_id` único
   // torna a reemissão do mesmo evento inofensiva. Os três índices de consulta cobrem os
   // filtros da leitura (tipo, ator, alvo), sempre com recorte por tempo.
