@@ -17,6 +17,10 @@ import type { Db } from 'mongodb';
 import type { Pool } from 'pg';
 import { montarProblema } from '../../../src/shared/errors/problem-json.js';
 import {
+  ehExcessoDeRateLimit,
+  problemaDeRateLimit,
+} from '../../../src/shared/rate-limit/resposta-429.js';
+import {
   criarServicoDeSenha,
   type ServicoDeSenha,
 } from '../../../src/shared/crypto/password.service.js';
@@ -90,6 +94,10 @@ export async function montarAppDeOAuth(opcoes: {
         .status(400)
         .type(TIPO_PROBLEM_JSON)
         .send(montarProblema('validation-error', 'Requisição inválida', 400));
+      return;
+    }
+    if (ehExcessoDeRateLimit(erro)) {
+      void resposta.status(429).type(TIPO_PROBLEM_JSON).send(problemaDeRateLimit());
       return;
     }
     void resposta

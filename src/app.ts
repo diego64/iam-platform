@@ -9,6 +9,9 @@ import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import fastifySwagger from '@fastify/swagger';
 import fastifySwaggerUi from '@fastify/swagger-ui';
 import fastifyRateLimit from '@fastify/rate-limit';
+import { criarStoreDoPlugin } from './shared/rate-limit/fastify-store.js';
+import { ehExcessoDeRateLimit, problemaDeRateLimit } from './shared/rate-limit/resposta-429.js';
+import type { ContadorDeRateLimit } from './shared/rate-limit/types.js';
 import fastifyHelmet from '@fastify/helmet';
 import fastifyCors from '@fastify/cors';
 import {
@@ -82,7 +85,22 @@ export function hopsDeProxyConfiaveis(env: Env): number | false {
   return env.NODE_ENV === 'production' ? 1 : false;
 }
 
+/** O que o app precisa para compartilhar o contador de rate limit entre as réplicas. */
+export interface RateLimitDoApp {
+  readonly contador: ContadorDeRateLimit;
+  readonly pepper: string;
+  readonly aoFalhar?: () => void;
+  /** Teto por IP estourado — a dimensão que o plugin decide sozinho. */
+  readonly aoExcederPorIp?: () => void;
+}
+
 export interface DependenciasDoApp {
+  /**
+   * Contador de rate limit compartilhado. Ausente — como na maior parte dos testes — o
+   * plugin cai no contador local dele, que é o comportamento de antes desta SPEC: correto
+   * num processo só, e insuficiente com mais de uma réplica.
+   */
+  readonly rateLimit?: RateLimitDoApp;
   /**
    * Serviço de prontidão. Opcional porque testes que só exercitam liveness ou o handler
    * de erro não precisam de banco — nesse caso o readiness responde 503, que é a
@@ -258,7 +276,29 @@ export async function construirApp(
    * Precisa vir ANTES de qualquer rota: uma rota que declara `config.rateLimit` sem o
    * plugin registrado **falha no registro**, e o processo não sobe.
    */
-  await app.register(fastifyRateLimit, { global: false });
+  await app.register(fastifyRateLimit, {
+    global: false,
+    // Com o store compartilhado, o teto passa a valer para a plataforma inteira e não por
+    // processo. Sem ele, o limite efetivo é o configurado vezes o número de réplicas.
+    ...(dependencias.rateLimit === undefined
+      ? {}
+      : {
+          store: criarStoreDoPlugin({
+            contador: dependencias.rateLimit.contador,
+            pepper: dependencias.rateLimit.pepper,
+            aoExceder: () => {
+              dependencias.rateLimit?.aoExcederPorIp?.();
+            },
+            aoFalhar: () => {
+              dependencias.rateLimit?.aoFalhar?.();
+              app.log.warn(
+                { evento: 'rate_limit.contador_indisponivel' },
+                'contador de rate limit indisponível: a requisição seguiu sem o limite',
+              );
+            },
+          }),
+        }),
+  });
 
   await app.register(fastifyHelmet);
 
@@ -280,6 +320,13 @@ export async function construirApp(
         .status(400)
         .type(TIPO_PROBLEM_JSON)
         .send(montarProblema('validation-error', 'Requisição inválida', 400));
+      return;
+    }
+
+    // O plugin de rate limit lança um erro com `statusCode` 429; sem este ramo ele cairia
+    // no genérico e sairia como `request-error`, indistinguível de qualquer outro 4xx.
+    if (ehExcessoDeRateLimit(erro)) {
+      void resposta.status(429).type(TIPO_PROBLEM_JSON).send(problemaDeRateLimit());
       return;
     }
 

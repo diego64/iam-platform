@@ -10,11 +10,20 @@
  *  - O que sai daqui é exatamente o que `app.ts` precisa para registrar cada módulo — o
  *    formato dos objetos é o das dependências de rota, para não haver tradução no meio.
  */
+import type { FastifyReply } from 'fastify';
 import type { Db } from 'mongodb';
 import type { Pool } from 'pg';
 import type { Env } from '../config/env.js';
 import type { Logger } from '../shared/logger/index.js';
 import { criarServicoDeSenhaDaEnv } from '../shared/crypto/password.service.js';
+import { criarContadorEmMemoria } from '../shared/rate-limit/memory-store.js';
+import { criarContadorNoMongo } from '../shared/rate-limit/mongo-store.js';
+import { criarPoliticaDeRateLimit } from '../shared/rate-limit/politica.js';
+import { criarHookDeLimitePorIdentidade } from '../shared/rate-limit/hook-por-identidade.js';
+import { criarMedidorDeRateLimit } from '../shared/rate-limit/rate-limit.metrics.js';
+import { problemaDeRateLimit } from '../shared/rate-limit/resposta-429.js';
+import { clientIdApresentado } from '../modules/oauth/services/client-credentials.js';
+import type { ContadorDeRateLimit } from '../shared/rate-limit/types.js';
 import {
   criarAuthService,
   criarMedidorDeAuth,
@@ -78,6 +87,7 @@ import {
   criarRepositorioDeDesafioDeMfa,
   criarRepositorioDeFatorDeMfa,
   criarServicoDeDesafioDeMfa,
+  digerirTokenDeDesafio,
   type DependenciasDasRotasDeMfa,
 } from '../modules/mfa/index.js';
 import {
@@ -137,7 +147,17 @@ export interface DependenciasDaComposicao {
  * chave nova: sem o segredo não existe serviço de rotação, e as rotas administrativas de
  * chave não sobem.
  */
+/** O que o app precisa para compartilhar o contador de rate limit entre as réplicas. */
+export interface RateLimitDaAplicacao {
+  readonly contador: ContadorDeRateLimit;
+  readonly pepper: string;
+  /** Teto por IP estourado — a dimensão que o plugin decide sozinho. */
+  readonly aoExcederPorIp?: () => void;
+}
+
 export interface ModulosDaAplicacao {
+  /** Contador compartilhado, entregue ao plugin de rate limit pelo `app.ts`. */
+  readonly rateLimit: RateLimitDaAplicacao;
   readonly auth: DependenciasDasRotasDeAuth;
   readonly refresh: DependenciasDasRotasDeRefresh;
   readonly oauth: DependenciasDasRotasDeOAuth;
@@ -280,6 +300,82 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
           ...(medidorDeMfa ? { medidor: medidorDeMfa } : {}),
         });
 
+  // Rate limit: um contador para a plataforma inteira, e a política que o consulta. Com o
+  // contador local do plugin, o teto seria multiplicado pelo número de réplicas.
+  const pepperDeLimite = exigirPepper(env);
+  const medidorDeLimite = metricas ? criarMedidorDeRateLimit() : undefined;
+  const contadorDeLimite =
+    env.RATE_LIMIT_STORE === 'memory'
+      ? criarContadorEmMemoria()
+      : criarContadorNoMongo({
+          banco,
+          timeoutMs: env.RATE_LIMIT_STORE_TIMEOUT_MS,
+          aoFalhar: () => {
+            medidorDeLimite?.contarErroDoContador();
+          },
+        });
+  const politicaDeLimite = criarPoliticaDeRateLimit({
+    contador: contadorDeLimite,
+    pepper: pepperDeLimite,
+    auditoria,
+    ...(medidorDeLimite ? { medidor: medidorDeLimite } : {}),
+    aoFalhar: ({ rota, dimensao }) => {
+      logger.warn(
+        { evento: 'rate_limit.contador_indisponivel', rota, dimensao },
+        'contador de rate limit indisponível: a requisição seguiu sem o limite',
+      );
+    },
+  });
+
+  /** Barra com o 429 padrão da plataforma — problem+json com `Retry-After`. */
+  async function barrarComProblemJson(
+    resposta: FastifyReply,
+    retryAfterSegundos: number,
+  ): Promise<void> {
+    await resposta
+      .status(429)
+      .header('retry-after', String(retryAfterSegundos))
+      .type('application/problem+json')
+      .send(problemaDeRateLimit());
+  }
+
+  /**
+   * Barra no formato da RFC 6749. `/oauth/*` tem vocabulário próprio de erro (SPEC 012), e
+   * misturar problem+json ali quebraria as bibliotecas cliente de OAuth.
+   */
+  async function barrarComSlowDown(
+    resposta: FastifyReply,
+    retryAfterSegundos: number,
+  ): Promise<void> {
+    await resposta
+      .status(429)
+      .header('retry-after', String(retryAfterSegundos))
+      .type('application/json')
+      .send({ error: 'slow_down', error_description: 'Limite de requisições excedido.' });
+  }
+
+  const limitePorConta = criarHookDeLimitePorIdentidade({
+    politica: politicaDeLimite,
+    dimensao: 'conta',
+    teto: env.RATE_LIMIT_LOGIN_ACCOUNT_MAX,
+    janelaMs: env.RATE_LIMIT_LOGIN_WINDOW_MS,
+    identificar: (requisicao) => {
+      const corpo = requisicao.body as { email?: unknown } | undefined;
+      return typeof corpo?.email === 'string' ? corpo.email : null;
+    },
+    responder: barrarComProblemJson,
+  });
+
+  const limitePorCliente = criarHookDeLimitePorIdentidade({
+    politica: politicaDeLimite,
+    dimensao: 'cliente',
+    teto: env.RATE_LIMIT_OAUTH_CLIENT_MAX,
+    janelaMs: env.RATE_LIMIT_LOGIN_WINDOW_MS,
+    identificar: (requisicao) =>
+      clientIdApresentado(requisicao.headers.authorization, requisicao.body ?? {}),
+    responder: barrarComSlowDown,
+  });
+
   const authService = criarAuthService({
     repo: repoAuth,
     servicoDeSenha,
@@ -366,13 +462,43 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
         });
 
   return {
-    auth: { authService, verificarAccessToken },
+    rateLimit: {
+      contador: contadorDeLimite,
+      pepper: pepperDeLimite,
+      // A dimensão IP é decidida pelo plugin; o registro na trilha entra por aqui para os
+      // três excessos aparecerem no mesmo lugar.
+      aoExcederPorIp: () => {
+        medidorDeLimite?.contarBloqueio('*', 'ip');
+        void auditoria.registrar({
+          type: 'iam.rate_limit.exceeded',
+          actor: { id: null, type: 'system' },
+          outcome: 'failure',
+          metadata: { dimensao: 'ip' },
+        });
+      },
+    },
+    auth: { authService, verificarAccessToken, limitePorConta },
     refresh: { refreshTokenService },
-    oauth: { oauthService },
+    oauth: { oauthService, limitePorCliente },
     ...(env.MASTER_KEY === undefined
       ? {}
       : {
           mfa: {
+            // A cota é do usuário, não do desafio: sem isto, pedir um desafio novo zeraria
+            // o contador e o teto por tentativa viraria decoração.
+            limitePorConta: criarHookDeLimitePorIdentidade({
+              politica: politicaDeLimite,
+              dimensao: 'conta',
+              teto: env.RATE_LIMIT_MFA_ACCOUNT_MAX,
+              janelaMs: env.RATE_LIMIT_LOGIN_WINDOW_MS,
+              identificar: async (requisicao) => {
+                const corpo = requisicao.body as { mfa_token?: unknown } | undefined;
+                if (typeof corpo?.mfa_token !== 'string') return null;
+                const desafio = await repoDesafios.buscar(digerirTokenDeDesafio(corpo.mfa_token));
+                return desafio?.userId ?? null;
+              },
+              responder: barrarComProblemJson,
+            }),
             mfaService: criarMfaService({
               fatores: repoFatores,
               codigos: repoCodigos,

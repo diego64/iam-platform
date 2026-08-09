@@ -1307,7 +1307,10 @@ paths:
       summary: Autentica e-mail + senha e emite os tokens
       description: >
         Falha de credencial responde 401 com mensagem única e genérica, sem distinguir
-        usuário inexistente de senha errada. Rate limit por IP; excedido, 429 com Retry-After.
+        usuário inexistente de senha errada. Dois limites independentes: por IP e por conta —
+        o segundo é o que barra o ataque distribuído, em que cada tentativa vem de um
+        endereço diferente. Só tentativa falha consome a cota da conta. Excedido qualquer um
+        dos dois, 429 `rate-limit-exceeded` com `Retry-After`.
       operationId: authLogin
       security: []
       requestBody:
@@ -1341,7 +1344,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
         '429':
-          description: Rate limit excedido
+          description: >-
+            Limite excedido (`rate-limit-exceeded`). Acompanha `Retry-After` em segundos. O
+            corpo não informa qual dimensão estourou — dizê-lo confirmaria a existência da
+            conta a quem sonda, ou ensinaria a trocar de endereço.
           content:
             application/problem+json:
               schema:
@@ -1351,6 +1357,9 @@ paths:
       tags: [oauth]
       summary: Emite um access token pelos grants da RFC 6749
       description: >
+        Dois limites independentes: por IP e por cliente autenticado — o segundo é o que
+        contém quem varre segredo trocando de endereço. Só tentativa falha consome a cota do
+        cliente.
         Corpo em `application/x-www-form-urlencoded`; corpo JSON responde `invalid_request`.
         O cliente autentica por `Authorization: Basic` ou pelos campos `client_id`/
         `client_secret` no corpo — usar os dois na mesma requisição é `invalid_request`.
@@ -1580,6 +1589,8 @@ paths:
       description: >
         Aceita `code` (TOTP) ou `recovery_code`, nunca os dois. Desafio inexistente,
         expirado, com tentativas esgotadas e código errado respondem a mesma coisa.
+        Além do teto de tentativas por desafio, há um limite por conta que atravessa
+        desafios: pedir um desafio novo não devolve tentativas.
       operationId: mfaVerificar
       security: []
       requestBody:
@@ -1612,7 +1623,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
         '429':
-          description: Rate limit excedido
+          description: >-
+            Limite excedido (`rate-limit-exceeded`). Acompanha `Retry-After` em segundos. O
+            corpo não informa qual dimensão estourou — dizê-lo confirmaria a existência da
+            conta a quem sonda, ou ensinaria a trocar de endereço.
           content:
             application/problem+json:
               schema:
@@ -1685,7 +1699,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
         '429':
-          description: Rate limit excedido
+          description: >-
+            Limite excedido (`rate-limit-exceeded`). Acompanha `Retry-After` em segundos. O
+            corpo não informa qual dimensão estourou — dizê-lo confirmaria a existência da
+            conta a quem sonda, ou ensinaria a trocar de endereço.
           content:
             application/problem+json:
               schema:

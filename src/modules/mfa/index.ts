@@ -7,6 +7,7 @@ export {
 } from './services/mfa.service.js';
 export {
   criarServicoDeDesafioDeMfa,
+  digerirTokenDeDesafio,
   type DependenciasDoDesafioDeMfa,
 } from './services/mfa-challenge.service.js';
 export {

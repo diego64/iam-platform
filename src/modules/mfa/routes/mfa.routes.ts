@@ -26,11 +26,18 @@ import {
 import { LIMITE_VERIFICACAO } from '../hooks/mfa-rate-limit.js';
 import type { VerificadorDeAccessToken } from '../../auth/middleware/verify-access-token.js';
 import type { GuardsDeAutorizacao } from '../../rbac/middleware/require-permission.js';
+import type { HooksDeLimite } from '../../../shared/rate-limit/hook-por-identidade.js';
 import { z } from 'zod';
 
 export interface DependenciasDasRotasDeMfa extends DependenciasDoControllerDeMfa {
   readonly verificarAccessToken: VerificadorDeAccessToken;
   readonly guards: GuardsDeAutorizacao;
+  /**
+   * Limite por conta na verificação. O teto de tentativas por desafio já existe e é outra
+   * coisa: ele morre com o desafio, então quem pede um desafio novo ganha tentativas novas.
+   * Este é o que conta por usuário e atravessa desafios.
+   */
+  readonly limitePorConta?: HooksDeLimite;
 }
 
 const parametroDeUsuario = z.object({ id: z.string().uuid() });
@@ -131,6 +138,12 @@ export async function registrarRotasDeMfa(
           response: { 200: respostaDeTokens },
         },
         config: { rateLimit: LIMITE_VERIFICACAO },
+        ...(deps.limitePorConta === undefined
+          ? {}
+          : {
+              preHandler: deps.limitePorConta.preHandler,
+              onResponse: deps.limitePorConta.onResponse,
+            }),
       },
       (requisicao, resposta) => controller.verificar(requisicao, resposta),
     );

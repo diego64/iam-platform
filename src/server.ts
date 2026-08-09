@@ -151,7 +151,15 @@ async function iniciar(): Promise<void> {
         });
   agendadorDeRotacao?.iniciar();
 
-  const app = await construirApp(env, { prontidao, telemetria, jwks, modulos });
+  // O contador de rate limit vem da composição — construído uma vez, com o mesmo pepper da
+  // trilha, e usado tanto pelo plugin (dimensão IP) quanto pelos hooks por identidade.
+  const app = await construirApp(env, {
+    prontidao,
+    telemetria,
+    jwks,
+    modulos,
+    rateLimit: modulos.rateLimit,
+  });
 
   // Inventário do que esta instância serve. Existe para a pergunta que só aparece durante
   // um incidente — "esta réplica tem a rota nova?" — ser respondida pelo log da própria
