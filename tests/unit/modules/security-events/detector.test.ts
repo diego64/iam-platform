@@ -202,7 +202,12 @@ function montarDetector(
     Promise.resolve({ ...entrada, id: 'evt-1' } as unknown as EventoDeSeguranca),
   );
   const alertar = vi.fn(() => Promise.resolve());
-  const incrementarSilencio = vi.fn(() => Promise.resolve({ contagem: 1, expiraEm: new Date() }));
+  const incrementarSilencio = vi.fn(() =>
+    Promise.resolve({
+      contagem: opcoes.silenciado === true ? 2 : 1,
+      expiraEm: new Date(),
+    }),
+  );
   const medidor = {
     contarEvento: vi.fn(),
     contarErro: vi.fn(),
@@ -217,8 +222,9 @@ function montarDetector(
       buscarPorId: () => Promise.resolve(null),
     },
     silencio: {
-      ler: () =>
-        Promise.resolve({ contagem: opcoes.silenciado === true ? 1 : 0, expiraEm: new Date() }),
+      ler: () => Promise.resolve({ contagem: 0, expiraEm: new Date() }),
+      // A reivindicação é o incremento: contagem 1 significa que este venceu; acima disso,
+      // outra execução já alarmou por esta combinação.
       incrementar: incrementarSilencio,
     },
     silencioMs: 900_000,

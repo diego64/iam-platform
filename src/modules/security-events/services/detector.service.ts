@@ -9,10 +9,12 @@
  *    erro e as demais seguem. Sem isso, um `null` inesperado numa regra apagaria a detecção
  *    inteira, e ninguém perceberia — é justamente o tipo de falha silenciosa que a métrica
  *    de erro existe para denunciar.
- *  - **Silêncio por (regra, sujeito).** Depois de disparar, aquela combinação fica muda por
- *    um período. Sem freio, um ataque em curso emite alarme a cada tentativa e o canal vira
- *    fluxo — e ninguém lê o segundo aviso.
- *  - A ordem é: persiste, mede, alerta, silencia. Alertar antes de persistir deixaria um
+ *  - **Silêncio por (regra, sujeito), reivindicado e não consultado.** Depois de disparar,
+ *    aquela combinação fica muda por um período. Sem freio, um ataque em curso emite alarme
+ *    a cada tentativa e o canal vira fluxo — ninguém lê o segundo aviso. E como a detecção
+ *    roda solta, a decisão é por incremento atômico: consultar antes de marcar deixaria uma
+ *    rajada inteira passar pela janela entre a leitura e a escrita.
+ *  - A ordem é: reivindica, persiste, mede, alerta. Alertar antes de persistir deixaria um
  *    aviso apontando para um evento que não existe se a escrita falhar.
  */
 import { medidorDeSegurancaNulo, type MedidorDeSeguranca } from '../metrics/security.metrics.js';
@@ -54,12 +56,20 @@ export function criarDetector(deps: DependenciasDoDetector): Detector {
     return `sil:${deteccao.regra}:${deteccao.sujeito.pista}`;
   }
 
-  /** `true` se a combinação já disparou há pouco e deve ficar muda. */
-  async function emSilencio(deteccao: Deteccao): Promise<boolean> {
-    const estado = await deps.silencio.ler(chaveDeSilencio(deteccao));
-    // Contador indisponível: prefere avisar de novo a engolir um alarme. O ruído é
-    // recuperável; o alarme perdido não.
-    return estado !== null && estado.contagem > 0;
+  /**
+   * Reivindica o direito de alarmar por esta combinação, e devolve `true` para quem venceu.
+   *
+   * É incremento-e-compara, não leitura-e-decisão: a detecção roda solta, então uma rajada
+   * produz várias execuções concorrentes, e todas leriam "não silenciado" antes de qualquer
+   * uma escrever. Só o primeiro incremento devolve 1 — os outros já veem o próprio efeito
+   * dos vizinhos.
+   *
+   * Contador indisponível reivindica: prefere-se avisar de novo a engolir um alarme, porque
+   * ruído é recuperável e alarme perdido não.
+   */
+  async function reivindicar(deteccao: Deteccao): Promise<boolean> {
+    const estado = await deps.silencio.incrementar(chaveDeSilencio(deteccao), deps.silencioMs);
+    return estado === null || estado.contagem === 1;
   }
 
   async function registrar(deteccao: Deteccao): Promise<void> {
@@ -77,7 +87,6 @@ export function criarDetector(deps: DependenciasDoDetector): Detector {
     medidor.contarEvento(deteccao.regra, deteccao.severidade);
     // O canal não pode impedir o registro: o evento já está gravado quando o aviso sai.
     await canal.alertar(evento);
-    await deps.silencio.incrementar(chaveDeSilencio(deteccao), deps.silencioMs);
   }
 
   return {
@@ -88,7 +97,8 @@ export function criarDetector(deps: DependenciasDoDetector): Detector {
         try {
           const deteccao = await regra(evento, deps.contexto);
           if (deteccao === null) continue;
-          if (await emSilencio(deteccao)) continue;
+          // Reivindica antes de agir: quem não venceu não alarma.
+          if (!(await reivindicar(deteccao))) continue;
           await registrar(deteccao);
         } catch (erro) {
           // Isolada de propósito: a próxima regra ainda tem chance de ver o mesmo fato.
