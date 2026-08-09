@@ -22,6 +22,16 @@ import { criarPoliticaDeRateLimit } from '../shared/rate-limit/politica.js';
 import { criarHookDeLimitePorIdentidade } from '../shared/rate-limit/hook-por-identidade.js';
 import { criarMedidorDeRateLimit } from '../shared/rate-limit/rate-limit.metrics.js';
 import { problemaDeRateLimit } from '../shared/rate-limit/resposta-429.js';
+import {
+  criarCanalDeLog as criarCanalDeAlertaEmLog,
+  criarDetector,
+  criarExtratorDeSujeito,
+  criarMedidorDeSeguranca,
+  criarRegistradorComDeteccao,
+  criarRepositorioDeConjuntoDistinto,
+  criarRepositorioDeEventosDeSeguranca,
+  type DependenciasDasRotasDeSeguranca,
+} from '../modules/security-events/index.js';
 import { clientIdApresentado } from '../modules/oauth/services/client-credentials.js';
 import type { ContadorDeRateLimit } from '../shared/rate-limit/types.js';
 import {
@@ -175,6 +185,7 @@ export interface ModulosDaAplicacao {
   readonly clientes: DependenciasDasRotasDeClientes;
   readonly chaves?: DependenciasDasRotasDeChaves;
   readonly auditoria: DependenciasDasRotasDeAuditoria;
+  readonly seguranca: DependenciasDasRotasDeSeguranca;
 }
 
 /**
@@ -248,7 +259,7 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
    */
   const trilha = criarRepositorioDaTrilha(banco, { maxTentativas: env.AUDIT_CAS_MAX_RETRIES });
   const checkpoints = criarRepositorioDeCheckpoint(pool);
-  const auditoria: RegistradorDeAuditoria = criarAuditService({
+  const registradorDaTrilha: RegistradorDeAuditoria = criarAuditService({
     trilha,
     checkpoints,
     logger,
@@ -256,6 +267,72 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
     checkpointACada: env.AUDIT_CHECKPOINT_EVERY,
     ...(metricas ? { medidor: criarMedidorDeAuditoria() } : {}),
   });
+
+  // Rate limit: um contador para a plataforma inteira, e a política que o consulta. Com o
+  // contador local do plugin, o teto seria multiplicado pelo número de réplicas.
+  const pepperDeLimite = exigirPepper(env);
+  const medidorDeLimite = metricas ? criarMedidorDeRateLimit() : undefined;
+  const contadorDeLimite =
+    env.RATE_LIMIT_STORE === 'memory'
+      ? criarContadorEmMemoria()
+      : criarContadorNoMongo({
+          banco,
+          timeoutMs: env.RATE_LIMIT_STORE_TIMEOUT_MS,
+          aoFalhar: () => {
+            medidorDeLimite?.contarErroDoContador();
+          },
+        });
+  /**
+   * Detecção de eventos de segurança.
+   *
+   * O registrador que os sete módulos recebem é o **decorado**: ele grava na trilha e, no
+   * caminho, oferece o fato às regras. Nenhum emissor sabe que a detecção existe, e o
+   * módulo que alguém escrever daqui a três meses entra de graça.
+   */
+  const eventosDeSeguranca = criarRepositorioDeEventosDeSeguranca(banco);
+  const medidorDeSeguranca = metricas ? criarMedidorDeSeguranca() : undefined;
+  const detector = criarDetector({
+    contexto: {
+      contador: contadorDeLimite,
+      conjuntos: criarRepositorioDeConjuntoDistinto({
+        banco,
+        tamanhoMaximo: env.SECURITY_SET_MAX,
+        aoFalhar: () => {
+          medidorDeSeguranca?.contarErro();
+        },
+      }),
+      extrator: criarExtratorDeSujeito(pepperDeLimite),
+      limiares: {
+        bruteForceMax: env.SECURITY_BRUTE_FORCE_MAX,
+        bruteForceJanelaMs: env.SECURITY_BRUTE_FORCE_WINDOW_MS,
+        stuffingContasMax: env.SECURITY_STUFFING_CONTAS_MAX,
+        stuffingJanelaMs: env.SECURITY_STUFFING_WINDOW_MS,
+        varreduraDeClienteMax: env.SECURITY_CLIENT_SCAN_MAX,
+        varreduraDeClienteJanelaMs: env.SECURITY_CLIENT_SCAN_WINDOW_MS,
+        mfaFalhasMax: env.SECURITY_MFA_FAIL_MAX,
+        mfaJanelaMs: env.SECURITY_MFA_FAIL_WINDOW_MS,
+      },
+    },
+    eventos: eventosDeSeguranca,
+    silencio: contadorDeLimite,
+    silencioMs: env.SECURITY_SILENCE_MS,
+    retencaoMs: env.SECURITY_EVENT_TTL_MS,
+    canal: criarCanalDeAlertaEmLog(logger),
+    ...(medidorDeSeguranca ? { medidor: medidorDeSeguranca } : {}),
+    aoFalhar: ({ erro }) => {
+      logger.warn({ err: erro, evento: 'security.detector_falhou' }, 'regra de detecção falhou');
+    },
+  });
+
+  /**
+   * O que os sete módulos recebem daqui para baixo. O nome continua `auditoria` de
+   * propósito: quem injeta não precisa saber que há detecção no caminho, e o dia em que a
+   * detecção sair basta trocar esta linha.
+   */
+  const auditoria: RegistradorDeAuditoria = criarRegistradorComDeteccao(
+    registradorDaTrilha,
+    detector,
+  );
 
   const refreshTokenService = criarRefreshTokenService({
     repo: repoRefresh,
@@ -300,20 +377,6 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
           ...(medidorDeMfa ? { medidor: medidorDeMfa } : {}),
         });
 
-  // Rate limit: um contador para a plataforma inteira, e a política que o consulta. Com o
-  // contador local do plugin, o teto seria multiplicado pelo número de réplicas.
-  const pepperDeLimite = exigirPepper(env);
-  const medidorDeLimite = metricas ? criarMedidorDeRateLimit() : undefined;
-  const contadorDeLimite =
-    env.RATE_LIMIT_STORE === 'memory'
-      ? criarContadorEmMemoria()
-      : criarContadorNoMongo({
-          banco,
-          timeoutMs: env.RATE_LIMIT_STORE_TIMEOUT_MS,
-          aoFalhar: () => {
-            medidorDeLimite?.contarErroDoContador();
-          },
-        });
   const politicaDeLimite = criarPoliticaDeRateLimit({
     contador: contadorDeLimite,
     pepper: pepperDeLimite,
@@ -551,6 +614,11 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
     clientes: {
       service: clienteService,
       sobreposicaoPadraoMs: env.CLIENT_SECRET_OVERLAP_DEFAULT_MS,
+      guards,
+      verificarAccessToken,
+    },
+    seguranca: {
+      eventos: eventosDeSeguranca,
       guards,
       verificarAccessToken,
     },

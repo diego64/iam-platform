@@ -37,6 +37,7 @@ import { registrarRotasDeAuth } from './modules/auth/index.js';
 import { registrarRotasDeRefresh } from './modules/refresh-token/index.js';
 import { registrarRotasDeMetadados, registrarRotasDeOAuth } from './modules/oauth/index.js';
 import { registrarRotasDeMfa } from './modules/mfa/index.js';
+import { registrarRotasDeSeguranca } from './modules/security-events/index.js';
 import { registrarRotasDeSenha } from './modules/password/index.js';
 import type { DependenciasDoController as DependenciasDeSenha } from './modules/password/index.js';
 import { registrarRotasDeUsuario } from './modules/users/index.js';
@@ -387,6 +388,7 @@ export async function construirApp(
     registrarRotasDeAbac(app, modulos.abac);
     registrarRotasDeClientes(app, modulos.clientes);
     registrarRotasDeAuditoria(app, modulos.auditoria);
+    registrarRotasDeSeguranca(app, modulos.seguranca);
 
     // Ausente quando não há segredo mestre: sem ele o serviço de rotação não existe, e as
     // rotas administrativas de chave não teriam o que servir.

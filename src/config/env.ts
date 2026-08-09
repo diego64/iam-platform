@@ -263,6 +263,49 @@ export const esquemaEnv = z.object({
     .max(24 * 60 * 60 * 1000)
     .default(5 * 60 * 1000),
 
+  // Detecção de eventos de segurança. Os limiares são o que separa alarme útil de ruído:
+  // apertado demais ensina a ignorar o aviso, frouxo demais avisa quando já é tarde.
+  SECURITY_BRUTE_FORCE_MAX: z.coerce.number().int().min(1).default(10),
+  SECURITY_BRUTE_FORCE_WINDOW_MS: z.coerce
+    .number()
+    .int()
+    .min(1000)
+    .default(5 * 60 * 1000),
+  SECURITY_STUFFING_CONTAS_MAX: z.coerce.number().int().min(2).default(10),
+  SECURITY_STUFFING_WINDOW_MS: z.coerce
+    .number()
+    .int()
+    .min(1000)
+    .default(10 * 60 * 1000),
+  SECURITY_CLIENT_SCAN_MAX: z.coerce.number().int().min(1).default(20),
+  SECURITY_CLIENT_SCAN_WINDOW_MS: z.coerce
+    .number()
+    .int()
+    .min(1000)
+    .default(5 * 60 * 1000),
+  SECURITY_MFA_FAIL_MAX: z.coerce.number().int().min(1).default(10),
+  SECURITY_MFA_FAIL_WINDOW_MS: z.coerce
+    .number()
+    .int()
+    .min(1000)
+    .default(10 * 60 * 1000),
+  // Quanto tempo uma combinação (regra, sujeito) fica muda depois de disparar. Sem freio, um
+  // ataque em curso emite alarme a cada tentativa e ninguém lê o segundo aviso.
+  SECURITY_SILENCE_MS: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .default(15 * 60 * 1000),
+  // Retenção do juízo. A trilha de fatos não expira; a conclusão derivada, sim.
+  SECURITY_EVENT_TTL_MS: z.coerce
+    .number()
+    .int()
+    .min(60_000)
+    .default(90 * 24 * 60 * 60 * 1000),
+  // Teto do conjunto de contas distintas por IP: o limiar dispara muito antes, e documento
+  // sem teto é porta aberta para inflar memória enquanto o ataque durar.
+  SECURITY_SET_MAX: z.coerce.number().int().min(10).max(10_000).default(200),
+
   // Onde vive o contador de rate limit. `mongo` compartilha a contagem entre as réplicas;
   // `memory` volta ao contador por processo — suficiente em desenvolvimento e no teste, e
   // enganoso em produção, onde o teto efetivo viraria o configurado vezes o número de
