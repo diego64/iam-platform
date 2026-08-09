@@ -47,6 +47,13 @@ tags:
       Segundo fator (TOTP e códigos de recuperação). Com fator ativo, `POST /auth/login`
       devolve um desafio em vez dos tokens, e `POST /auth/mfa/verify` o troca pelo par. Quem
       não tem fator não percebe diferença.
+  - name: security
+    description: >-
+      Eventos de segurança detectados por correlação sobre a trilha. Só leitura: o evento é
+      produzido de dentro do processo, e aceitar escrita de fora transformaria o detector num
+      alvo — bastaria inundar a coleção de eventos falsos para esconder o ataque real. O
+      sujeito é sempre uma pista anonimizada; descobrir de quem se trata exige cruzar com a
+      trilha, e esse cruzamento fica auditado.
   - name: oauth
     description: >-
       Superfície OAuth 2.0 (RFC 6749). O corpo é form-urlencoded e o erro segue o formato da
@@ -190,6 +197,80 @@ components:
           type: array
           items:
             type: string
+    EventoDeSeguranca:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - regra
+        - severidade
+        - sujeito
+        - ocorrencias
+        - janela_ms
+        - primeira_em
+        - ultima_em
+        - detectado_em
+        - trace_id
+        - metadata
+      properties:
+        id:
+          type: string
+        regra:
+          type: string
+          enum:
+            - brute_force_conta
+            - credential_stuffing
+            - varredura_de_cliente
+            - reuso_de_refresh
+            - mfa_sob_ataque
+        severidade:
+          type: string
+          enum: [baixa, media, alta]
+        sujeito:
+          type: object
+          additionalProperties: false
+          required: [tipo, pista]
+          properties:
+            tipo:
+              type: string
+              enum: [conta, ip, cliente, usuario]
+            pista:
+              type: string
+              description: >-
+                Digest do identificador com pepper — o mesmo valor que a trilha guarda em
+                `subject_hint`. Nunca o e-mail, o IP ou o `client_id`.
+        ocorrencias:
+          type: integer
+        janela_ms:
+          type: integer
+        primeira_em:
+          type: string
+          format: date-time
+        ultima_em:
+          type: string
+          format: date-time
+        detectado_em:
+          type: string
+          format: date-time
+        trace_id:
+          type: string
+          nullable: true
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+    ListaDeEventosDeSeguranca:
+      type: object
+      additionalProperties: false
+      required: [items, proximo_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/EventoDeSeguranca'
+        proximo_cursor:
+          type: string
+          nullable: true
     TokenRequest:
       type: object
       # Sem `additionalProperties: false`: a RFC 6749 §3.2 manda ignorar parâmetro
@@ -1348,6 +1429,70 @@ paths:
             Limite excedido (`rate-limit-exceeded`). Acompanha `Retry-After` em segundos. O
             corpo não informa qual dimensão estourou — dizê-lo confirmaria a existência da
             conta a quem sonda, ou ensinaria a trocar de endereço.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /security/events:
+    get:
+      tags: [security]
+      summary: Lista os eventos de segurança detectados
+      description: >
+        Sem `desde`/`ate`, a leitura assume as últimas 24 h — uma consulta sem recorte
+        varreria a coleção inteira, e o custo apareceria justamente no dia do ataque.
+      operationId: securityEventsList
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { name: regra, in: query, schema: { type: string } }
+        - { name: severidade, in: query, schema: { type: string } }
+        - { name: desde, in: query, schema: { type: string, format: date-time } }
+        - { name: ate, in: query, schema: { type: string, format: date-time } }
+        - { name: pista, in: query, schema: { type: string } }
+        - { name: limite, in: query, schema: { type: integer, minimum: 1, maximum: 200 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Página de eventos, do mais recente para o mais antigo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListaDeEventosDeSeguranca'
+        '400':
+          description: Recorte inválido — `ate` anterior a `desde`, ou janela acima do teto
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '403':
+          description: Sem a permissão security:read
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /security/events/{id}:
+    get:
+      tags: [security]
+      summary: Detalha um evento de segurança
+      description: >
+        O sujeito continua anonimizado. Para descobrir de quem se trata, cruze a pista com
+        `GET /audit/events` — e esse cruzamento fica auditado.
+      operationId: securityEventsGet
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: O evento
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventoDeSeguranca'
+        '404':
+          description: Evento não encontrado
           content:
             application/problem+json:
               schema:

@@ -36,6 +36,21 @@ export async function garantirIndices(banco: Db): Promise<void> {
   await banco
     .collection('rate_limit_counters')
     .createIndexes([{ key: { expires_at: 1 }, expireAfterSeconds: 0 }]);
+  // Eventos de segurança — juízo derivado, com validade, separado da trilha de fatos. A
+  // leitura padrão é por tempo decrescente; os outros dois índices cobrem o filtro por regra
+  // e a investigação a partir de um sujeito. TTL porque conclusão expira: a regra de hoje
+  // pode estar errada amanhã.
+  await banco.collection('security_events').createIndexes([
+    { key: { detectado_em: -1 } },
+    { key: { regra: 1, detectado_em: -1 } },
+    { key: { 'sujeito.pista': 1, detectado_em: -1 } },
+    { key: { expires_at: 1 }, expireAfterSeconds: 0 }, // TTL
+  ]);
+  // Conjuntos de valores distintos por janela (credential stuffing). A chave é o `_id`, e o
+  // único índice a criar é o TTL.
+  await banco
+    .collection('security_distinct_sets')
+    .createIndexes([{ key: { expires_at: 1 }, expireAfterSeconds: 0 }]);
   // Trilha de auditoria. `seq` único é o que denuncia buraco na cadeia, e `event_id` único
   // torna a reemissão do mesmo evento inofensiva. Os três índices de consulta cobrem os
   // filtros da leitura (tipo, ator, alvo), sempre com recorte por tempo.
