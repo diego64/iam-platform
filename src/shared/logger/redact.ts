@@ -53,6 +53,11 @@ const CAMPOS_SENSIVEIS = [
   'recovery_codes',
   'secret_encrypted',
   'segredoCifrado',
+  // Endereço de e-mail. Não é credencial, é identificação: com a plataforma passando a
+  // mandar aviso de segurança, o e-mail deixa de ser dado incidental e vira o dado central
+  // de um módulo inteiro. O que identifica uma linha de entrega é o digest; o endereço em
+  // claro ficaria retido e indexado no agregador por muito mais tempo que o incidente.
+  'email',
 ] as const;
 
 /** Monta os caminhos de censura para o Pino a partir dos campos sensíveis. */

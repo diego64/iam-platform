@@ -1,6 +1,7 @@
 /**
  * Cobre o canal de log-fallback: avisa o pedido de reset sem entregar nada e, sobretudo,
- * **sem logar o token** — que é a credencial e derrotaria o sha256 no banco se vazasse.
+ * sem logar o token — que é a credencial e derrotaria o sha256 no banco se vazasse — nem o
+ * endereço de quem pediu.
  */
 import { describe, expect, it } from 'vitest';
 import { Writable } from 'node:stream';
@@ -19,15 +20,17 @@ function capturar(): { linhas: string[]; destino: Writable } {
 }
 
 describe('criarCanalDeLog', () => {
-  it('registra o pedido sem incluir o token', async () => {
+  it('registra o pedido sem incluir o token nem o endereço', async () => {
     const { linhas, destino } = capturar();
     const canal = criarCanalDeLog(criarLogger({ nivel: 'warn', destino }));
 
     await canal.enviarReset('user@iam.local', 'token-secreto-abc');
 
     const saida = linhas.join('');
-    expect(saida).toContain('user@iam.local');
+    expect(saida).toContain('log-fallback');
     expect(saida).not.toContain('token-secreto-abc');
+    // Ambiente sem canal real é justamente onde ninguém olha para o que o log acumula.
+    expect(saida).not.toContain('user@iam.local');
   });
 
   it('não lança — canal indisponível não derruba o fluxo de reset', async () => {
