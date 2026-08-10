@@ -34,7 +34,7 @@ import {
 import type { Env } from './config/env.js';
 import { montarProblema } from './shared/errors/problem-json.js';
 import { contextoDeTrace } from './shared/logger/index.js';
-import { registrarRotasDeHealth } from './modules/health/index.js';
+import { registrarRotaDeSecurityTxt, registrarRotasDeHealth } from './modules/health/index.js';
 import type { ServicoDeProntidao } from './modules/health/services/prontidao.service.js';
 import type { Telemetria } from './telemetry/sdk.js';
 import { obterInstrumentos, rotuloDeRota } from './telemetry/metricas.js';
@@ -441,6 +441,8 @@ export async function construirApp(
   registrarRotasDeHealth(app, {
     prontidao: dependencias.prontidao ?? prontidaoIndisponivel(),
   });
+
+  registrarRotaDeSecurityTxt(app);
 
   if (dependencias.jwks !== undefined) {
     registrarRotasDeJwks(app, { jwks: dependencias.jwks });
