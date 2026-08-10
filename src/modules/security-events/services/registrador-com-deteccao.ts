@@ -14,6 +14,7 @@
  *    encerramento é menos grave que somar latência a todo login.
  *  - `registrar` continua nunca lançando — nem quando a detecção explode.
  */
+import { enriquecerComContexto } from '../../audit/services/contexto.js';
 import type { RegistradorDeAuditoria } from '../../audit/interfaces/audit-recorder.js';
 import type { EventoDeAuditoria } from '../../audit/types/audit-event.js';
 import type { Detector } from './detector.service.js';
@@ -24,11 +25,16 @@ export function criarRegistradorComDeteccao(
 ): RegistradorDeAuditoria {
   return {
     async registrar(evento: EventoDeAuditoria): Promise<void> {
-      await base.registrar(evento);
+      // Enriquecido aqui, e não só lá dentro: nenhum emissor preenche ip nem user-agent —
+      // quem os conhece é o contexto da requisição. Entregar às regras o evento cru fazia a
+      // correlação por origem enxergar `undefined` e nunca fechar limiar nenhum.
+      const enriquecido = enriquecerComContexto(evento);
+
+      await base.registrar(enriquecido);
 
       // Sem `await`: a requisição que gerou o fato não espera pelo juízo. O `catch` existe
       // porque uma promessa solta que rejeita derruba o processo no Node.
-      void detector.observar(evento).catch(() => {
+      void detector.observar(enriquecido).catch(() => {
         /* o detector já engole e mede o próprio erro; aqui é só a rede de segurança */
       });
     },

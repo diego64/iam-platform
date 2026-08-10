@@ -30,6 +30,7 @@ import type {
 } from '../repositories/audit-log.repository.js';
 import type { RepositorioDeCheckpoint } from '../repositories/audit-checkpoint.repository.js';
 import { calcularHashDoElo } from './chain-hash.js';
+import { enriquecerComContexto } from './contexto.js';
 import { medidorDeAuditoriaNulo, type MedidorDeAuditoria } from '../metrics/audit.metrics.js';
 
 export interface DependenciasDoAuditService {
@@ -72,22 +73,16 @@ export function criarAuditService(deps: DependenciasDoAuditService): Registrador
     if (proibidas.length > 0) throw new ErroDeAuditoria('metadata-proibida', proibidas);
 
     const contexto = contextoDeRequisicao();
-    const ip = evento.actor.ip ?? contexto?.ip;
-    const userAgent = evento.actor.userAgent ?? contexto?.userAgent;
+    // Quem emite descreve o que sabe. Serviço administrativo conhece o alvo, não quem pediu;
+    // a origem e o ator vêm do contexto. Onde o emissor afirma `null` e não há autenticação
+    // — login que falhou —, `null` é o que fica.
+    const { actor } = enriquecerComContexto(evento);
 
     return {
       eventId: uuidv7(),
       type: evento.type,
       occurredAt: new Date(),
-      actor: {
-        // Quem emite descreve o que sabe. Serviço administrativo conhece o alvo, não quem
-        // pediu; o ator vem do contexto da requisição. Onde o emissor afirma `null` e não
-        // há autenticação — login que falhou —, `null` é o que fica.
-        id: evento.actor.id ?? contexto?.atorId ?? null,
-        type: evento.actor.type,
-        ...(ip === undefined ? {} : { ip }),
-        ...(userAgent === undefined ? {} : { userAgent }),
-      },
+      actor,
       target: evento.target ?? null,
       outcome: evento.outcome,
       reason: evento.reason ?? null,

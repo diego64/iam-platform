@@ -10,6 +10,7 @@ export {
   type RelatorioDeIntegridade,
 } from './services/audit-integrity.service.js';
 export { calcularHashDoElo, corpoDe } from './services/chain-hash.js';
+export { enriquecerComContexto } from './services/contexto.js';
 export {
   criarRepositorioDaTrilha,
   ErroDeContencaoDaCadeia,
