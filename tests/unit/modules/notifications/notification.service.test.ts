@@ -34,7 +34,9 @@ function montar(
   opcoes: {
     entrega?: ResultadoDeEntrega;
     email?: string | null;
-    contagem?: number | null;
+    contagem?: number;
+    /** Contador fora do ar: `incrementar` devolve `null`, que é "não sei". */
+    contadorFora?: boolean;
     maxPorHora?: number;
   } = {},
 ): Montagem {
@@ -51,12 +53,13 @@ function montar(
     },
   };
 
-  // `null` explícito é "contador fora do ar"; ausente é a contagem normal de 1.
-  const contagem = opcoes.contagem === undefined ? 1 : opcoes.contagem;
+  const contagem = opcoes.contagem ?? 1;
   const teto: ContadorDeRateLimit = {
     incrementar: () =>
       Promise.resolve(
-        contagem === null ? null : { contagem, expiraEm: new Date(Date.now() + 3_600_000) },
+        opcoes.contadorFora === true
+          ? null
+          : { contagem, expiraEm: new Date(Date.now() + 3_600_000) },
       ),
     ler: () => Promise.resolve(null),
   };
@@ -139,7 +142,7 @@ describe('teto por destinatário', () => {
   });
 
   it('contador indisponível deixa passar', async () => {
-    const m = montar({ contagem: null });
+    const m = montar({ contadorFora: true });
 
     await m.servico.notificarUsuario(USUARIO, 'login_novo', CORPO);
 
