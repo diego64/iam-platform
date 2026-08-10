@@ -24,9 +24,29 @@ import {
   medidorDeNotificacoesNulo,
   type MedidorDeNotificacoes,
 } from '../metrics/notifications.metrics.js';
-import { digestDeEndereco } from './transporte-de-log.js';
+import { criarDigestDeEndereco } from './transporte-de-log.js';
 
 const UMA_HORA_MS = 60 * 60 * 1000;
+
+/**
+ * Baldes de cota independentes.
+ *
+ * Um teto único por endereço deixaria o aviso ao operador à mercê do volume de mensagens a
+ * usuários — e, pior, de si mesmo: cinco alertas numa hora (plausível durante um ataque de
+ * verdade) calariam os seguintes, e um administrador rodando a mensagem de teste silenciaria
+ * a operação pelo resto da hora. O canal que denuncia o incidente não pode se apagar no meio
+ * dele.
+ */
+const CATEGORIA_POR_TIPO: Readonly<Record<TipoDeNotificacao, 'usuario' | 'operacao'>> = {
+  login_novo: 'usuario',
+  recuperacao_usada: 'usuario',
+  senha_alterada: 'usuario',
+  mfa_alterado: 'usuario',
+  conta_bloqueada: 'usuario',
+  reset_de_senha: 'usuario',
+  alerta_de_seguranca: 'operacao',
+  teste: 'operacao',
+};
 
 export interface DependenciasDoServicoDeNotificacao {
   readonly transporte: TransportadorDeEmail;
@@ -34,6 +54,11 @@ export interface DependenciasDoServicoDeNotificacao {
   /** Mesmo contador das janelas de limite; aqui guarda o teto por destinatário. */
   readonly teto: ContadorDeRateLimit;
   readonly maxPorHora: number;
+  /**
+   * Deriva o digest do destinatário. Sem pepper, o digest de um e-mail é revertido por
+   * dicionário e o log volta a carregar o endereço — só que disfarçado.
+   */
+  readonly pepper: string;
   readonly logger: Logger;
   readonly medidor?: MedidorDeNotificacoes;
   readonly agora?: () => number;
@@ -45,15 +70,25 @@ export interface PedidoDeEnvio {
   readonly corpo: CorpoDeMensagem;
 }
 
+/**
+ * O desfecho de um pedido de notificação.
+ *
+ * Supressão é um terceiro estado, não um sabor de falha: "o teto da hora estourou" e "o
+ * provedor caiu" pedem ações opostas de quem investiga, e achatar os dois em `erro` faz o
+ * diagnóstico apontar para a variável de ambiente errada.
+ */
+export type ResultadoDeNotificacao =
+  ResultadoDeEntrega | { readonly ok: false; readonly suprimida: MotivoDeSupressao };
+
 export interface ServicoDeNotificacao {
   /** Entrega a endereços já conhecidos — operação e mensagem de teste. */
-  enviar(pedido: PedidoDeEnvio): Promise<ResultadoDeEntrega>;
+  enviar(pedido: PedidoDeEnvio): Promise<ResultadoDeNotificacao>;
   /** Entrega ao dono da conta, resolvendo o endereço pelo id do ator. */
   notificarUsuario(
     userId: string,
     tipo: TipoDeNotificacao,
     corpo: CorpoDeMensagem,
-  ): Promise<ResultadoDeEntrega>;
+  ): Promise<ResultadoDeNotificacao>;
 }
 
 export function criarServicoDeNotificacao(
@@ -61,27 +96,29 @@ export function criarServicoDeNotificacao(
 ): ServicoDeNotificacao {
   const medidor = deps.medidor ?? medidorDeNotificacoesNulo();
   const agora = deps.agora ?? Date.now;
+  const digestDeEndereco = criarDigestDeEndereco(deps.pepper);
 
-  function suprimir(tipo: TipoDeNotificacao, motivo: MotivoDeSupressao): ResultadoDeEntrega {
+  function suprimir(tipo: TipoDeNotificacao, motivo: MotivoDeSupressao): ResultadoDeNotificacao {
     medidor.contarSupressao(tipo, motivo);
-    return { ok: false, causa: 'nao_configurado' };
+    return { ok: false, suprimida: motivo };
   }
 
-  /** `true` quando o endereço ainda tem cota na hora corrente. */
-  async function temCota(endereco: string): Promise<boolean> {
-    const estado = await deps.teto.incrementar(`notif:${digestDeEndereco(endereco)}`, UMA_HORA_MS);
+  /** `true` quando o endereço ainda tem cota na categoria, na hora corrente. */
+  async function temCota(tipo: TipoDeNotificacao, endereco: string): Promise<boolean> {
+    const chave = `notif:${CATEGORIA_POR_TIPO[tipo]}:${digestDeEndereco(endereco)}`;
+    const estado = await deps.teto.incrementar(chave, UMA_HORA_MS);
     // `null` é "não sei", não "estourou". Negar aqui transformaria queda do contador em
     // silêncio total do canal de segurança.
     return estado === null || estado.contagem <= deps.maxPorHora;
   }
 
-  async function enviar(pedido: PedidoDeEnvio): Promise<ResultadoDeEntrega> {
+  async function enviar(pedido: PedidoDeEnvio): Promise<ResultadoDeNotificacao> {
     try {
       if (pedido.para.length === 0) return suprimir(pedido.tipo, 'sem_destinatario');
 
       const comCota: string[] = [];
       for (const endereco of pedido.para) {
-        if (await temCota(endereco)) comCota.push(endereco);
+        if (await temCota(pedido.tipo, endereco)) comCota.push(endereco);
       }
       if (comCota.length === 0) return suprimir(pedido.tipo, 'teto');
 
@@ -133,7 +170,7 @@ export function criarServicoDeNotificacao(
   return {
     enviar,
 
-    async notificarUsuario(userId, tipo, corpo): Promise<ResultadoDeEntrega> {
+    async notificarUsuario(userId, tipo, corpo): Promise<ResultadoDeNotificacao> {
       const email = await deps.destinatarios.emailDe(userId);
       // Sem endereço não há aviso, e não há caminho de volta a partir da pista da trilha —
       // é a anonimização da SPEC 013 funcionando, não uma lacuna.

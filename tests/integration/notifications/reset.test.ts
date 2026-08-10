@@ -33,6 +33,7 @@ const NOVA = 'Outr@S3nhaBoa!';
 const VITIMA = 'vitima@iam.local';
 const URL_RESET = 'https://conta.exemplo.com/redefinir';
 const TETO = 3;
+const PEPPER = 'pepper-de-teste-com-mais-de-32-bytes-aqui';
 
 let pool: Pool;
 let cliente: MongoClient;
@@ -63,6 +64,7 @@ beforeAll(async () => {
     },
     destinatarios: criarResolvedorDeDestinatario({ pool }),
     teto: criarContadorNoMongo({ banco, timeoutMs: 500 }),
+    pepper: PEPPER,
     maxPorHora: TETO,
     logger,
   });

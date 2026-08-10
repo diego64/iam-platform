@@ -14,6 +14,7 @@ import type { Severidade } from '../../../../src/modules/security-events/constan
 import type { MensagemDeEmail } from '../../../../src/modules/notifications/types/mensagem.js';
 import type { TransportadorDeEmail } from '../../../../src/modules/notifications/interfaces/transporte.port.js';
 
+const PEPPER = 'pepper-de-teste-com-mais-de-32-bytes-aqui';
 const OPERACAO = ['seg@exemplo.com', 'plantao@exemplo.com'];
 const PISTA = '9f2a1c3d4e5f60718293a4b5c6d7e8f900112233445566778899aabbccddeeff';
 
@@ -53,6 +54,7 @@ function montar(
       destinatarios: { emailDe: () => Promise.resolve(null) },
       teto: { incrementar: () => Promise.resolve(null), ler: () => Promise.resolve(null) },
       maxPorHora: 50,
+      pepper: PEPPER,
       logger: criarLogger({ nivel: 'fatal' }),
     }),
     destinatarios: OPERACAO,
@@ -138,6 +140,7 @@ describe('robustez', () => {
         transporte: { enviar: () => Promise.resolve({ ok: true as const }) },
         destinatarios: { emailDe: () => Promise.resolve(null) },
         teto: { incrementar: () => Promise.resolve(null), ler: () => Promise.resolve(null) },
+        pepper: PEPPER,
         maxPorHora: 50,
         logger: criarLogger({ nivel: 'fatal' }),
       }),

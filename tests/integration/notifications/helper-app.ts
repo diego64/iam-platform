@@ -138,6 +138,7 @@ export async function montarAppDeNotificacoes(
     transporte,
     destinatarios: criarResolvedorDeDestinatario({ pool: opcoes.pool }),
     teto: criarContadorNoMongo({ banco: opcoes.banco, timeoutMs: 500 }),
+    pepper: PEPPER,
     maxPorHora: opcoes.maxPorHora ?? 50,
     logger,
   });

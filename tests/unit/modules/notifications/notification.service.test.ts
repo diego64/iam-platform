@@ -20,6 +20,7 @@ import type { Logger } from '../../../../src/shared/logger/index.js';
 const CORPO = { assunto: 'Sua senha foi alterada', texto: 'corpo', html: '<p>corpo</p>' };
 const USUARIO = '11111111-1111-4111-8111-111111111111';
 const EMAIL = 'vitima@iam.local';
+const PEPPER = 'pepper-de-teste-com-mais-de-32-bytes-aqui';
 
 interface Montagem {
   servico: ServicoDeNotificacao;
@@ -84,6 +85,7 @@ function montar(
     },
     teto,
     maxPorHora: opcoes.maxPorHora ?? 5,
+    pepper: PEPPER,
     logger: { info: registrar, warn: registrar, error: registrar } as unknown as Logger,
     medidor,
   });
@@ -141,6 +143,35 @@ describe('teto por destinatário', () => {
     expect(m.supressoes).toEqual([{ tipo: 'reset_de_senha', motivo: 'teto' }]);
   });
 
+  it('aviso ao usuário e alerta à operação contam em baldes separados', async () => {
+    const chaves: string[] = [];
+    const servico = criarServicoDeNotificacao({
+      transporte: { enviar: () => Promise.resolve({ ok: true as const }) },
+      destinatarios: { emailDe: () => Promise.resolve(EMAIL) },
+      teto: {
+        incrementar: (chave) => {
+          chaves.push(chave);
+          return Promise.resolve({ contagem: 1, expiraEm: new Date() });
+        },
+        ler: () => Promise.resolve(null),
+      },
+      maxPorHora: 5,
+      pepper: PEPPER,
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as unknown as Logger,
+    });
+
+    await servico.enviar({ tipo: 'login_novo', para: [EMAIL], corpo: CORPO });
+    await servico.enviar({ tipo: 'alerta_de_seguranca', para: [EMAIL], corpo: CORPO });
+    await servico.enviar({ tipo: 'teste', para: [EMAIL], corpo: CORPO });
+
+    // O canal que denuncia o incidente não pode se calar por causa do volume de mensagens a
+    // usuários — nem por causa de um administrador rodando a mensagem de teste.
+    expect(chaves[0]).toContain(':usuario:');
+    expect(chaves[1]).toContain(':operacao:');
+    expect(chaves[1]).toBe(chaves[2]);
+    expect(chaves[0]).not.toBe(chaves[1]);
+  });
+
   it('contador indisponível deixa passar', async () => {
     const m = montar({ contadorFora: true });
 
@@ -155,8 +186,19 @@ describe('teto por destinatário', () => {
 
     const resultado = await m.servico.enviar({ tipo: 'teste', para: [], corpo: CORPO });
 
-    expect(resultado.ok).toBe(false);
+    expect(resultado).toEqual({ ok: false, suprimida: 'sem_destinatario' });
     expect(m.supressoes).toEqual([{ tipo: 'teste', motivo: 'sem_destinatario' }]);
+  });
+
+  it('supressão não se passa por falha de transporte', async () => {
+    const m = montar({ contagem: 99, maxPorHora: 5 });
+
+    const resultado = await m.servico.notificarUsuario(USUARIO, 'teste', CORPO);
+
+    // "Estourou a cota" e "o provedor caiu" pedem ações opostas de quem investiga; achatar
+    // os dois em `causa` faz o diagnóstico apontar para a variável de ambiente errada.
+    expect(resultado).toEqual({ ok: false, suprimida: 'teto' });
+    expect(resultado).not.toHaveProperty('causa');
   });
 });
 
@@ -177,6 +219,7 @@ describe('falha de transporte', () => {
       destinatarios: { emailDe: () => Promise.resolve(EMAIL) },
       teto: { incrementar: () => Promise.resolve(null), ler: () => Promise.resolve(null) },
       maxPorHora: 5,
+      pepper: PEPPER,
       logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as unknown as Logger,
     });
 

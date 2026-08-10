@@ -219,7 +219,7 @@ components:
           description: Quantos endereços de operação receberam. Os endereços em si não voltam.
         resultado:
           type: string
-          enum: [ok, erro]
+          enum: [ok, erro, suprimida]
         duracao_ms:
           type: integer
           minimum: 0
@@ -227,6 +227,10 @@ components:
           type: string
           enum: [timeout, recusado, indisponivel, nao_configurado]
           description: Presente só quando `resultado` é `erro`. Vocabulário fechado.
+        motivo:
+          type: string
+          enum: [teto, sem_destinatario, dispositivo_conhecido, severidade]
+          description: Presente só quando `resultado` é `suprimida`. Vocabulário fechado.
       example:
         transporte: http
         destinatarios: 2
@@ -1542,6 +1546,9 @@ paths:
         Falha do provedor responde 200 relatando a causa, porque o pedido estava certo e
         quem falhou foi o provedor. A causa é de vocabulário fechado: a mensagem original
         costuma ecoar a requisição, incluindo destinatário.
+        `suprimida` é um terceiro desfecho, distinto de `erro`: a mensagem não saiu por
+        decisão da plataforma (teto da hora, por exemplo), não por falha de quem entrega —
+        e os dois pedem ações opostas de quem investiga.
       operationId: notificationsTest
       security: [{ BearerAuth: [] }]
       requestBody:

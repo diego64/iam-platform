@@ -12,6 +12,7 @@
  *  - Todo aviso ao dono da conta termina com a mesma instrução. Aviso sem o que fazer não
  *    serve para nada — quem recebe precisa saber qual é o próximo passo.
  */
+import type { Regra, Severidade } from '../../security-events/constants/regras.js';
 import type { CorpoDeMensagem, OrigemDoAcesso } from '../types/mensagem.js';
 
 /** Acima disso, o user-agent é ruído — e um campo sem teto é um corpo de e-mail sem teto. */
@@ -21,6 +22,7 @@ const ACAO = 'Se não foi você, troque sua senha imediatamente e revise suas se
 
 const ASSUNTOS = {
   login_novo: 'Novo acesso à sua conta',
+  recuperacao_usada: 'Um código de recuperação foi usado na sua conta',
   senha_alterada: 'Sua senha foi alterada',
   mfa_alterado: 'A verificação em duas etapas da sua conta mudou',
   conta_bloqueada: 'Seu acesso foi suspenso',
@@ -95,6 +97,28 @@ export function senhaAlterada(quando: Date): CorpoDeMensagem {
   ]);
 }
 
+/**
+ * Código de recuperação usado.
+ *
+ * Mensagem própria, e não um `login_novo`, por dois motivos. O sinal é diferente: quem usa
+ * código de recuperação está contornando o segundo fator, que é o caminho clássico da tomada
+ * de conta depois de um vazamento de senha. E ela **não** passa pela checagem de dispositivo:
+ * um código de recuperação usado de um aparelho conhecido continua merecendo aviso, porque o
+ * que chama atenção é o contorno, não a origem.
+ */
+export function recuperacaoUsada(origem: OrigemDoAcesso): CorpoDeMensagem {
+  return montar(ASSUNTOS.recuperacao_usada, [
+    'Um código de recuperação foi usado para entrar na sua conta, no lugar da verificação em duas etapas.',
+    '',
+    `Quando: ${formatarInstante(origem.quando)}`,
+    `Origem: ${origem.ip === null ? 'não identificada' : limpar(origem.ip)}`,
+    `Dispositivo: ${origem.userAgent === null ? 'não identificado' : limpar(origem.userAgent)}`,
+    '',
+    'Cada código só funciona uma vez. Se foi você, considere gerar novos códigos.',
+    ACAO,
+  ]);
+}
+
 export function mfaAlterado(quando: Date): CorpoDeMensagem {
   return montar(ASSUNTOS.mfa_alterado, [
     `A verificação em duas etapas da sua conta foi alterada em ${formatarInstante(quando)}.`,
@@ -131,8 +155,13 @@ export function resetDeSenha(urlBase: string, token: string, validadeMin: number
 }
 
 export interface DadosDeAlerta {
-  readonly regra: string;
-  readonly severidade: string;
+  /**
+   * Uniões fechadas, não `string`: a regra é o único trecho interpolado num assunto em todo
+   * o catálogo, e assunto montado com texto livre é injeção de cabeçalho esperando um
+   * chamador distraído. O tipo fecha a porta; o `limpar` abaixo é o cinto de segurança.
+   */
+  readonly regra: Regra;
+  readonly severidade: Severidade;
   readonly ocorrencias: number;
   readonly janelaMs: number;
   readonly detectadoEm: Date;
@@ -148,7 +177,7 @@ export interface DadosDeAlerta {
 export function alertaDeSeguranca(dados: DadosDeAlerta): CorpoDeMensagem {
   const janelaMin = Math.round(dados.janelaMs / 60_000);
 
-  return montar(`[IAM] Alerta de segurança: ${dados.regra}`, [
+  return montar(`[IAM] Alerta de segurança: ${limpar(dados.regra)}`, [
     `Regra:       ${dados.regra}`,
     `Severidade:  ${dados.severidade}`,
     `Ocorrências: ${String(dados.ocorrencias)} em ${String(janelaMin)} min`,

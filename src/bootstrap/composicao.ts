@@ -308,6 +308,10 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
    * nada para a rede, em vez de falhar na primeira entrega.
    */
   const medidorDeNotificacoes = metricas ? criarMedidorDeNotificacoes() : undefined;
+  // Separado do pepper da trilha de propósito: aquele é perpétuo, para não quebrar a
+  // correlação histórica, e este pode ser rotacionado. Deriva tanto o digest do dispositivo
+  // quanto o do destinatário no log — sem ele, o digest de um e-mail cai por dicionário.
+  const pepperDeNotificacao = env.NOTIFY_DEVICE_PEPPER ?? pepperDeLimite;
   const transporte: TransportadorDeEmail =
     env.NOTIFY_TRANSPORT === 'http' &&
     env.NOTIFY_HTTP_URL !== undefined &&
@@ -322,7 +326,7 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
             logger.warn({ err: erro, evento: 'notification.transporte_falhou' }, 'entrega falhou');
           },
         })
-      : criarTransporteDeLog(logger);
+      : criarTransporteDeLog(logger, pepperDeNotificacao);
 
   const notificacoes = criarServicoDeNotificacao({
     transporte,
@@ -334,6 +338,7 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
     }),
     teto: contadorDeLimite,
     maxPorHora: env.NOTIFY_MAX_PER_HOUR,
+    pepper: pepperDeNotificacao,
     logger,
     ...(medidorDeNotificacoes ? { medidor: medidorDeNotificacoes } : {}),
   });
@@ -360,10 +365,9 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
     dispositivos: criarRepositorioDeDispositivos({
       banco,
       ttlMs: env.NOTIFY_DEVICE_TTL_MS,
-      // Separado do pepper da trilha de propósito: aquele é perpétuo para não quebrar a
-      // correlação histórica, e este pode ser rotacionado.
-      pepper: env.NOTIFY_DEVICE_PEPPER ?? pepperDeLimite,
+      pepper: pepperDeNotificacao,
     }),
+    ...(medidorDeNotificacoes ? { medidor: medidorDeNotificacoes } : {}),
     aoFalhar: (erro) => {
       logger.warn({ err: erro, evento: 'notification.notificador_falhou' }, 'aviso não saiu');
     },

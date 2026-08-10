@@ -5,6 +5,7 @@ export {
 } from './routes/notifications.routes.js';
 export {
   criarServicoDeNotificacao,
+  type ResultadoDeNotificacao,
   type ServicoDeNotificacao,
   type DependenciasDoServicoDeNotificacao,
 } from './services/notification.service.js';
@@ -16,7 +17,7 @@ export {
 export { criarCanalDeReset, type OpcoesDoCanalDeReset } from './services/canal-de-reset.js';
 export { criarCanalDeEmail, type OpcoesDoCanalDeEmail } from './services/canal-de-email.js';
 export { criarTransporteHttp, type OpcoesDoTransporteHttp } from './services/transporte-http.js';
-export { criarTransporteDeLog, digestDeEndereco } from './services/transporte-de-log.js';
+export { criarTransporteDeLog, criarDigestDeEndereco } from './services/transporte-de-log.js';
 export {
   criarRepositorioDeDispositivos,
   prefixoDeRede,

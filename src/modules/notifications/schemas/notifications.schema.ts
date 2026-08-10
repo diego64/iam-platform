@@ -9,7 +9,7 @@
  *    que sai é a causa do vocabulário fechado.
  */
 import { z } from 'zod';
-import { CAUSAS_DE_FALHA } from '../constants/tipos.js';
+import { CAUSAS_DE_FALHA, MOTIVOS_DE_SUPRESSAO } from '../constants/tipos.js';
 
 export const corpoDoTeste = z.object({}).strict();
 
@@ -17,9 +17,12 @@ export const resultadoDoTeste = z
   .object({
     transporte: z.enum(['log', 'http']),
     destinatarios: z.number().int().nonnegative(),
-    resultado: z.enum(['ok', 'erro']),
+    // `suprimida` é desfecho próprio: a mensagem não saiu por decisão da plataforma, não
+    // por falha de quem entrega. Quem lê precisa saber qual dos dois foi.
+    resultado: z.enum(['ok', 'erro', 'suprimida']),
     duracao_ms: z.number().int().nonnegative(),
     causa: z.enum(CAUSAS_DE_FALHA).optional(),
+    motivo: z.enum(MOTIVOS_DE_SUPRESSAO).optional(),
   })
   .strict();
 

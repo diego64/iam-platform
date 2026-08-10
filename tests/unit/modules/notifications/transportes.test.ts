@@ -10,8 +10,8 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { criarTransporteHttp } from '../../../../src/modules/notifications/services/transporte-http.js';
 import {
+  criarDigestDeEndereco,
   criarTransporteDeLog,
-  digestDeEndereco,
 } from '../../../../src/modules/notifications/services/transporte-de-log.js';
 import { transporteNulo } from '../../../../src/modules/notifications/interfaces/transporte.port.js';
 import type { Logger } from '../../../../src/shared/logger/index.js';
@@ -23,6 +23,9 @@ const MENSAGEM: MensagemDeEmail = {
   texto: 'corpo em texto',
   html: '<p>corpo em texto</p>',
 };
+
+const PEPPER = 'pepper-de-teste-com-mais-de-32-bytes-aqui';
+const digestDeEndereco = criarDigestDeEndereco(PEPPER);
 
 const ECO_DO_PROVEDOR = 'erro do provedor: to=vitima@iam.local token=token-secreto';
 
@@ -179,7 +182,7 @@ describe('transporte de log', () => {
   it('não registra o endereço nem o corpo', async () => {
     const { logger, linhas } = loggerFalso();
 
-    await criarTransporteDeLog(logger).enviar(MENSAGEM);
+    await criarTransporteDeLog(logger, PEPPER).enviar(MENSAGEM);
     const inteiro = JSON.stringify(linhas);
 
     expect(inteiro).not.toContain('vitima@iam.local');
@@ -188,13 +191,21 @@ describe('transporte de log', () => {
   });
 
   it('devolve sucesso — em desenvolvimento, falha seria falso incidente', async () => {
-    await expect(criarTransporteDeLog(loggerFalso().logger).enviar(MENSAGEM)).resolves.toEqual({
+    await expect(
+      criarTransporteDeLog(loggerFalso().logger, PEPPER).enviar(MENSAGEM),
+    ).resolves.toEqual({
       ok: true,
     });
   });
 
   it('o digest normaliza caixa e espaço', () => {
     expect(digestDeEndereco(' VITIMA@iam.local ')).toBe(digestDeEndereco('vitima@iam.local'));
+  });
+
+  it('o digest depende do pepper — sem ele, uma wordlist reverteria o endereço', () => {
+    const outro = criarDigestDeEndereco('outro-pepper-de-teste-com-32-bytes-ok');
+
+    expect(outro('vitima@iam.local')).not.toBe(digestDeEndereco('vitima@iam.local'));
   });
 });
 

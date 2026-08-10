@@ -14,6 +14,7 @@ import type { TransportadorDeEmail } from '../../../../src/modules/notifications
 
 const EMAIL = 'user@iam.local';
 const TOKEN = 'token-secreto-de-reset';
+const PEPPER = 'pepper-de-teste-com-mais-de-32-bytes-aqui';
 const URL_RESET = 'https://conta.exemplo.com/redefinir';
 
 function montar(transporte: TransportadorDeEmail): ReturnType<typeof criarCanalDeReset> {
@@ -23,6 +24,7 @@ function montar(transporte: TransportadorDeEmail): ReturnType<typeof criarCanalD
       destinatarios: { emailDe: () => Promise.resolve(null) },
       teto: { incrementar: () => Promise.resolve(null), ler: () => Promise.resolve(null) },
       maxPorHora: 5,
+      pepper: PEPPER,
       logger: criarLogger({ nivel: 'fatal' }),
     }),
     urlDeReset: URL_RESET,
@@ -59,9 +61,10 @@ describe('criarCanalDeReset', () => {
 
     const canal = criarCanalDeReset({
       notificacoes: criarServicoDeNotificacao({
-        transporte: criarTransporteDeLog(logger),
+        transporte: criarTransporteDeLog(logger, PEPPER),
         destinatarios: { emailDe: () => Promise.resolve(null) },
         teto: { incrementar: () => Promise.resolve(null), ler: () => Promise.resolve(null) },
+        pepper: PEPPER,
         maxPorHora: 5,
         logger,
       }),

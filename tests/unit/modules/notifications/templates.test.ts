@@ -6,6 +6,7 @@
  * de reset aparece uma vez só, dentro do link.
  */
 import { describe, expect, it } from 'vitest';
+import type { DadosDeAlerta } from '../../../../src/modules/notifications/services/templates.js';
 import {
   alertaDeSeguranca,
   ASSUNTOS_ESPERADOS,
@@ -123,7 +124,7 @@ describe('reset_de_senha', () => {
 });
 
 describe('alerta_de_seguranca', () => {
-  const DADOS = {
+  const DADOS: DadosDeAlerta = {
     regra: 'brute_force_conta',
     severidade: 'alta',
     ocorrencias: 12,

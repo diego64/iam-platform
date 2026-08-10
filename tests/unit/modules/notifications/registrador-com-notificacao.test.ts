@@ -13,6 +13,7 @@ import {
 import { comContextoDeRequisicao } from '../../../../src/shared/context/request-context.js';
 import type { ServicoDeNotificacao } from '../../../../src/modules/notifications/services/notification.service.js';
 import type { RepositorioDeDispositivos } from '../../../../src/modules/notifications/repositories/known-device.repository.js';
+import type { MedidorDeNotificacoes } from '../../../../src/modules/notifications/metrics/notifications.metrics.js';
 import type { RegistradorDeAuditoria } from '../../../../src/modules/audit/interfaces/audit-recorder.js';
 import type { EventoDeAuditoria } from '../../../../src/modules/audit/types/audit-event.js';
 
@@ -30,9 +31,11 @@ function montar(dispositivoNovo = true): {
   observar(evento: EventoDeAuditoria): Promise<void>;
   avisados: Avisado[];
   vistos: { userId: string; ip: string | null; userAgent: string | null }[];
+  supressoes: { tipo: string; motivo: string }[];
 } {
   const avisados: Avisado[] = [];
   const vistos: { userId: string; ip: string | null; userAgent: string | null }[] = [];
+  const supressoes: { tipo: string; motivo: string }[] = [];
 
   const notificacoes = {
     notificarUsuario(userId: string, tipo: string, corpo: { assunto: string; texto: string }) {
@@ -49,7 +52,21 @@ function montar(dispositivoNovo = true): {
     },
   };
 
-  return { ...criarNotificador({ notificacoes, dispositivos }), avisados, vistos };
+  const medidor = {
+    contarEnvio: () => undefined,
+    contarFalha: () => undefined,
+    contarSupressao: (tipo: string, motivo: string) => {
+      supressoes.push({ tipo, motivo });
+    },
+    observarEntrega: () => undefined,
+  } as unknown as MedidorDeNotificacoes;
+
+  return {
+    ...criarNotificador({ notificacoes, dispositivos, medidor }),
+    avisados,
+    vistos,
+    supressoes,
+  };
 }
 
 const LOGIN: EventoDeAuditoria = {
@@ -70,12 +87,45 @@ describe('quais fatos viram aviso', () => {
     expect(m.avisados[0]?.texto).toContain('203.0.113.10');
   });
 
-  it('login de dispositivo conhecido não avisa', async () => {
+  it('login de dispositivo conhecido não avisa, mas conta o silêncio', async () => {
     const m = montar(false);
 
     await m.observar(LOGIN);
 
     expect(m.avisados).toHaveLength(0);
+    // É o silêncio mais frequente do sistema: sem contador, "não recebi o aviso de login"
+    // é indistinguível de um canal quebrado.
+    expect(m.supressoes).toEqual([{ tipo: 'login_novo', motivo: 'dispositivo_conhecido' }]);
+  });
+
+  it('login com segundo fator avisa — é a conta mais protegida da plataforma', async () => {
+    const m = montar();
+
+    await m.observar({
+      type: 'iam.mfa.verified',
+      actor: { id: USUARIO, type: 'user', ip: '203.0.113.10', userAgent: 'Mozilla/5.0' },
+      outcome: 'success',
+    });
+
+    // Quem tem MFA não passa por `iam.auth.login`: o login para no desafio e quem registra a
+    // entrada é este evento. Sem ele no mapa, justamente essa conta nunca era avisada.
+    expect(m.avisados).toHaveLength(1);
+    expect(m.avisados[0]?.tipo).toBe('login_novo');
+  });
+
+  it('código de recuperação avisa mesmo de dispositivo conhecido', async () => {
+    const m = montar(false);
+
+    await m.observar({
+      type: 'iam.mfa.recovery_used',
+      actor: { id: USUARIO, type: 'user', ip: '203.0.113.10', userAgent: 'Mozilla/5.0' },
+      outcome: 'success',
+    });
+
+    // O que chama atenção é o contorno do segundo fator, não a origem de onde ele veio.
+    expect(m.avisados[0]?.tipo).toBe('recuperacao_usada');
+    expect(m.avisados[0]?.assunto).toContain('código de recuperação');
+    expect(m.vistos).toHaveLength(0);
   });
 
   it('troca e reset de senha avisam a mesma coisa', async () => {

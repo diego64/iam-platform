@@ -8,7 +8,10 @@
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { CAUSAS_DE_FALHA } from '../../src/modules/notifications/constants/tipos.js';
+import {
+  CAUSAS_DE_FALHA,
+  MOTIVOS_DE_SUPRESSAO,
+} from '../../src/modules/notifications/constants/tipos.js';
 
 const contrato = readFileSync(new URL('../../openapi/openapi.yaml', import.meta.url), 'utf8');
 
@@ -64,6 +67,14 @@ describe('ResultadoDeTesteDeNotificacao', () => {
 
     // Divergir aqui devolveria ao cliente uma causa que ele não sabe interpretar.
     expect(bloco).toContain(`enum: [${CAUSAS_DE_FALHA.join(', ')}]`);
+  });
+
+  it('supressão é desfecho próprio, com vocabulário próprio', () => {
+    const bloco = blocoDoSchema('ResultadoDeTesteDeNotificacao');
+
+    // "Estourou a cota" e "o provedor caiu" pedem ações opostas de quem investiga.
+    expect(bloco).toContain('enum: [ok, erro, suprimida]');
+    expect(bloco).toContain(`enum: [${MOTIVOS_DE_SUPRESSAO.join(', ')}]`);
   });
 
   it('não devolve os endereços, só quantos foram', () => {

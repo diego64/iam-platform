@@ -50,6 +50,11 @@ export function criarTransporteHttp(opcoes: OpcoesDoTransporteHttp): Transportad
           signal: AbortSignal.timeout(opcoes.timeoutMs),
         });
 
+        // Cancelar não é ler: o corpo continua fora do log, e o socket não fica preso
+        // esperando um consumidor que nunca vem. Sem isto, cada entrega segura uma conexão
+        // do pool até o coletor de lixo passar.
+        await resposta.body?.cancel();
+
         if (resposta.ok) return { ok: true };
 
         // 4xx é configuração ou endereço ruim; 5xx é o provedor. A distinção importa para

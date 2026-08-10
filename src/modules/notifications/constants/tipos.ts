@@ -11,6 +11,7 @@
 
 export const TIPOS_DE_NOTIFICACAO = [
   'login_novo',
+  'recuperacao_usada',
   'senha_alterada',
   'mfa_alterado',
   'conta_bloqueada',
@@ -32,7 +33,6 @@ export const MOTIVOS_DE_SUPRESSAO = [
   'sem_destinatario',
   'dispositivo_conhecido',
   'severidade',
-  'nao_configurado',
 ] as const;
 
 export type MotivoDeSupressao = (typeof MOTIVOS_DE_SUPRESSAO)[number];

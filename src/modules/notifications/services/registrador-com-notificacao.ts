@@ -19,7 +19,17 @@ import type { TipoDeEvento } from '../../audit/constants/event-types.js';
 import type { TipoDeNotificacao } from '../constants/tipos.js';
 import type { RepositorioDeDispositivos } from '../repositories/known-device.repository.js';
 import type { ServicoDeNotificacao } from './notification.service.js';
-import { contaBloqueada, loginNovo, mfaAlterado, senhaAlterada } from './templates.js';
+import {
+  contaBloqueada,
+  loginNovo,
+  mfaAlterado,
+  recuperacaoUsada,
+  senhaAlterada,
+} from './templates.js';
+import {
+  medidorDeNotificacoesNulo,
+  type MedidorDeNotificacoes,
+} from '../metrics/notifications.metrics.js';
 
 /**
  * De que fato nasce que aviso. Fora desta tabela, nada notifica — e é a tabela inteira que
@@ -27,6 +37,11 @@ import { contaBloqueada, loginNovo, mfaAlterado, senhaAlterada } from './templat
  */
 const AVISO_POR_EVENTO: Partial<Record<TipoDeEvento, TipoDeNotificacao>> = {
   'iam.auth.login': 'login_novo',
+  // Quem tem segundo fator não passa por `iam.auth.login`: o login para no desafio e quem
+  // registra a entrada é o evento de MFA. Sem estas duas linhas, justamente a conta mais
+  // protegida da plataforma era a única que nunca recebia aviso de acesso.
+  'iam.mfa.verified': 'login_novo',
+  'iam.mfa.recovery_used': 'recuperacao_usada',
   'iam.password.changed': 'senha_alterada',
   'iam.password.reset_completed': 'senha_alterada',
   'iam.mfa.enrolled': 'mfa_alterado',
@@ -38,6 +53,7 @@ const AVISO_POR_EVENTO: Partial<Record<TipoDeEvento, TipoDeNotificacao>> = {
 export interface DependenciasDaNotificacao {
   readonly notificacoes: ServicoDeNotificacao;
   readonly dispositivos: RepositorioDeDispositivos;
+  readonly medidor?: MedidorDeNotificacoes;
   readonly aoFalhar?: (erro: unknown) => void;
   readonly agora?: () => Date;
 }
@@ -52,6 +68,7 @@ export function criarNotificador(deps: DependenciasDaNotificacao): {
   observar(evento: EventoDeAuditoria): Promise<void>;
 } {
   const agora = deps.agora ?? ((): Date => new Date());
+  const medidor = deps.medidor ?? medidorDeNotificacoesNulo();
 
   return {
     async observar(evento: EventoDeAuditoria): Promise<void> {
@@ -62,25 +79,30 @@ export function criarNotificador(deps: DependenciasDaNotificacao): {
         const userId = afetado(evento);
         if (userId === null) return;
 
+        const origem = {
+          ip: evento.actor.ip ?? null,
+          userAgent: evento.actor.userAgent ?? null,
+          quando: agora(),
+        };
+
         if (tipo === 'login_novo') {
           const novo = await deps.dispositivos.ehNovo({
             userId,
-            ip: evento.actor.ip ?? null,
-            userAgent: evento.actor.userAgent ?? null,
+            ip: origem.ip,
+            userAgent: origem.userAgent,
           });
           // Dispositivo conhecido é o caso comum. Avisar em todo login ensinaria a apagar
           // sem ler, e o dia do acesso suspeito pareceria igual aos outros trezentos.
-          if (!novo) return;
+          //
+          // Contado, e não apenas ignorado: este é o silêncio mais frequente do sistema, e
+          // sem contador "não recebi o aviso de login" não tem como ser distinguido de um
+          // canal quebrado.
+          if (!novo) {
+            medidor.contarSupressao(tipo, 'dispositivo_conhecido');
+            return;
+          }
 
-          await deps.notificacoes.notificarUsuario(
-            userId,
-            tipo,
-            loginNovo({
-              ip: evento.actor.ip ?? null,
-              userAgent: evento.actor.userAgent ?? null,
-              quando: agora(),
-            }),
-          );
+          await deps.notificacoes.notificarUsuario(userId, tipo, loginNovo(origem));
           return;
         }
 
@@ -89,7 +111,11 @@ export function criarNotificador(deps: DependenciasDaNotificacao): {
             ? senhaAlterada(agora())
             : tipo === 'mfa_alterado'
               ? mfaAlterado(agora())
-              : contaBloqueada(agora());
+              : // Código de recuperação não passa pela checagem de dispositivo: o que chama
+                // atenção é o contorno do segundo fator, não a origem de onde ele veio.
+                tipo === 'recuperacao_usada'
+                ? recuperacaoUsada(origem)
+                : contaBloqueada(agora());
 
         await deps.notificacoes.notificarUsuario(userId, tipo, corpo);
       } catch (erro) {

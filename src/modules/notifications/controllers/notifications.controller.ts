@@ -53,12 +53,17 @@ export function criarControllerDeNotificacoes(
         corpo: teste(new Date()),
       });
 
+      // Três desfechos, não dois. Supressão deliberada relatada como `erro` mandaria quem
+      // investiga conferir o provedor quando o que estourou foi a cota da hora.
       const corpo: ResultadoDoTeste = {
         transporte: deps.transporte,
         destinatarios: deps.destinatarios.length,
-        resultado: entrega.ok ? 'ok' : 'erro',
         duracao_ms: Date.now() - inicio,
-        ...(entrega.ok ? {} : { causa: entrega.causa }),
+        ...(entrega.ok
+          ? { resultado: 'ok' as const }
+          : 'suprimida' in entrega
+            ? { resultado: 'suprimida' as const, motivo: entrega.suprimida }
+            : { resultado: 'erro' as const, causa: entrega.causa }),
       };
 
       await resposta.status(200).send(corpo);
