@@ -40,6 +40,8 @@ let tokenOperador: string;
 let tokenCurioso: string;
 let ip = 0;
 
+type Resposta = Awaited<ReturnType<FastifyInstance['inject']>>;
+
 function proximoIp(): string {
   ip += 1;
   return `10.9.0.${String(ip)}`;
@@ -150,7 +152,14 @@ describe('POST /notifications/test', () => {
   });
 
   it('campo extra no corpo é recusado — o destinatário nunca vem da requisição', async () => {
-    const res = await app.inject({
+    // App próprio: o limite de 3/min é por instância, e os casos acima já gastaram a cota.
+    const { app: limpo } = await montarAppDeNotificacoes({
+      pool,
+      banco,
+      destinatariosDeOperacao: OPERACAO,
+    });
+
+    const res = await limpo.inject({
       method: 'POST',
       url: '/notifications/test',
       headers: { authorization: `Bearer ${tokenOperador}` },
@@ -159,6 +168,27 @@ describe('POST /notifications/test', () => {
 
     // Um endereço aceito aqui transformaria a rota num relay de spam autenticado.
     expect(res.statusCode).toBe(400);
+    await limpo.close();
+  });
+
+  it('a quarta chamada do minuto é recusada — a rota é diagnóstico, não canal', async () => {
+    const { app: limpo } = await montarAppDeNotificacoes({
+      pool,
+      banco,
+      destinatariosDeOperacao: OPERACAO,
+    });
+    const disparar = async (): Promise<Resposta> =>
+      limpo.inject({
+        method: 'POST',
+        url: '/notifications/test',
+        headers: { authorization: `Bearer ${tokenOperador}` },
+        payload: {},
+      });
+
+    for (let tentativa = 0; tentativa < 3; tentativa += 1) await disparar();
+
+    expect((await disparar()).statusCode).toBe(429);
+    await limpo.close();
   });
 
   it('sem endereço de operação configurado, 409', async () => {
