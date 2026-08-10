@@ -12,4 +12,3 @@ export interface CargaDoToken {
   scope: string;
   roles: string[];
 }
-

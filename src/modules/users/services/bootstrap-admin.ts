@@ -38,9 +38,11 @@ export async function garantirAdminDeBootstrap(deps: {
     [opcoes.email, hash],
   );
 
+  // Sem o endereço: ele agora é campo censurado pelo logger, e quem lê este log é quem
+  // configurou a variável — a linha diz o que aconteceu, que é o que faltava saber.
   if ((rowCount ?? 0) > 0) {
-    logger.info({ email: opcoes.email }, 'bootstrap.admin_criado');
+    logger.info('bootstrap.admin_criado');
   } else {
-    logger.info({ email: opcoes.email }, 'bootstrap.admin_ja_existia');
+    logger.info('bootstrap.admin_ja_existia');
   }
 }

@@ -36,7 +36,7 @@ describe('censura do logger', () => {
     expect(linhas[0]?.outro).toBe('ok');
   });
 
-  it('remove senha do corpo de requisição (req.body)', () => {
+  it('remove senha e e-mail do corpo de requisição (req.body)', () => {
     const { linhas, destino } = capturar();
 
     criarLogger({ destino }).info(
@@ -46,7 +46,10 @@ describe('censura do logger', () => {
 
     const texto = JSON.stringify(linhas[0]);
     expect(texto).not.toContain('N0v@Senh@!');
-    expect(texto).toContain('a@b.com'); // e-mail não é segredo aqui
+    // O e-mail passou a ser censurado: ele não é credencial, é identificação, e com a
+    // plataforma mandando aviso de segurança ele virou o dado central de um módulo. O que
+    // identifica uma linha de entrega é o digest.
+    expect(texto).not.toContain('a@b.com');
   });
 
   it('remove password_hash e authorization', () => {
@@ -79,7 +82,7 @@ describe('censura do logger', () => {
   it('os caminhos cobrem os campos sensíveis conhecidos', () => {
     const caminhos = caminhosDeCensura();
 
-    for (const campo of ['senha', 'senha_atual', 'senha_nova', 'token', 'password_hash']) {
+    for (const campo of ['senha', 'senha_atual', 'senha_nova', 'token', 'password_hash', 'email']) {
       expect(caminhos).toContain(campo);
       expect(caminhos).toContain(`req.body.${campo}`);
     }

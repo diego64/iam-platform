@@ -30,6 +30,7 @@ import {
   criarRegistradorComDeteccao,
   criarRepositorioDeConjuntoDistinto,
   criarRepositorioDeEventosDeSeguranca,
+  type CanalDeAlerta,
   type DependenciasDasRotasDeSeguranca,
 } from '../modules/security-events/index.js';
 import { clientIdApresentado } from '../modules/oauth/services/client-credentials.js';
@@ -54,6 +55,20 @@ import { criarPasswordService } from '../modules/password/services/password.serv
 import { criarRepositorioDeTokenDeReset } from '../modules/password/repositories/reset-token.repository.js';
 import { criarRepositorioDeHistorico } from '../modules/password/repositories/password-history.repository.js';
 import { criarCanalDeLog } from '../modules/password/services/canal-de-log.js';
+import {
+  criarCanalDeEmail,
+  criarMedidorDeNotificacoes,
+  criarNotificador,
+  criarRegistradorComNotificacao,
+  criarRepositorioDeDispositivos,
+  criarResolvedorDeDestinatario,
+  criarServicoDeNotificacao,
+  criarTransporteDeLog,
+  criarTransporteHttp,
+  criarCanalDeReset,
+  type DependenciasDasRotasDeNotificacoes,
+  type TransportadorDeEmail,
+} from '../modules/notifications/index.js';
 import type { DependenciasDoController as DependenciasDeSenha } from '../modules/password/index.js';
 import {
   criarMedidorDeUsuarios,
@@ -137,6 +152,9 @@ import {
  */
 const PERMISSAO_DE_ADMINISTRACAO_DE_USUARIOS = 'users:write';
 
+/** Validade do token de reset. O e-mail precisa dizer o mesmo número que o serviço aplica. */
+const TTL_RESET_MIN = 30;
+
 export interface DependenciasDaComposicao {
   readonly env: Env;
   readonly pool: Pool;
@@ -186,6 +204,7 @@ export interface ModulosDaAplicacao {
   readonly chaves?: DependenciasDasRotasDeChaves;
   readonly auditoria: DependenciasDasRotasDeAuditoria;
   readonly seguranca: DependenciasDasRotasDeSeguranca;
+  readonly notificacoes: DependenciasDasRotasDeNotificacoes;
 }
 
 /**
@@ -283,6 +302,86 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
           },
         });
   /**
+   * Notificação: o mesmo padrão do decorador de detecção, uma camada acima.
+   *
+   * O transporte de log é o default deliberado — ambiente que subiu sem provedor não manda
+   * nada para a rede, em vez de falhar na primeira entrega.
+   */
+  const medidorDeNotificacoes = metricas ? criarMedidorDeNotificacoes() : undefined;
+  // Separado do pepper da trilha de propósito: aquele é perpétuo, para não quebrar a
+  // correlação histórica, e este pode ser rotacionado. Deriva tanto o digest do dispositivo
+  // quanto o do destinatário no log — sem ele, o digest de um e-mail cai por dicionário.
+  const pepperDeNotificacao = env.NOTIFY_DEVICE_PEPPER ?? pepperDeLimite;
+  const transporte: TransportadorDeEmail =
+    env.NOTIFY_TRANSPORT === 'http' &&
+    env.NOTIFY_HTTP_URL !== undefined &&
+    env.NOTIFY_HTTP_TOKEN !== undefined &&
+    env.NOTIFY_FROM !== undefined
+      ? criarTransporteHttp({
+          url: env.NOTIFY_HTTP_URL,
+          token: env.NOTIFY_HTTP_TOKEN,
+          remetente: env.NOTIFY_FROM,
+          timeoutMs: env.NOTIFY_TIMEOUT_MS,
+          aoFalhar: (erro) => {
+            logger.warn({ err: erro, evento: 'notification.transporte_falhou' }, 'entrega falhou');
+          },
+        })
+      : criarTransporteDeLog(logger, pepperDeNotificacao);
+
+  const notificacoes = criarServicoDeNotificacao({
+    transporte,
+    destinatarios: criarResolvedorDeDestinatario({
+      pool,
+      aoFalhar: (erro) => {
+        logger.warn({ err: erro, evento: 'notification.destinatario_falhou' }, 'consulta falhou');
+      },
+    }),
+    teto: contadorDeLimite,
+    maxPorHora: env.NOTIFY_MAX_PER_HOUR,
+    pepper: pepperDeNotificacao,
+    logger,
+    ...(medidorDeNotificacoes ? { medidor: medidorDeNotificacoes } : {}),
+  });
+
+  /**
+   * Canal de alerta do detector: e-mail quando há endereço de operação configurado, log
+   * quando não há. Sem endereço, avisar por e-mail seria mandar para lugar nenhum — e o
+   * log-fallback pelo menos deixa rastro em quem coleta.
+   */
+  const canalDeAlerta: CanalDeAlerta =
+    env.NOTIFY_OPERATOR_EMAILS.length > 0
+      ? criarCanalDeEmail({
+          notificacoes,
+          destinatarios: env.NOTIFY_OPERATOR_EMAILS,
+          severidadeMinima: env.NOTIFY_SECURITY_MIN_SEVERITY,
+          aoSuprimir: () => {
+            medidorDeNotificacoes?.contarSupressao('alerta_de_seguranca', 'severidade');
+          },
+        })
+      : criarCanalDeAlertaEmLog(logger);
+
+  const notificador = criarNotificador({
+    notificacoes,
+    dispositivos: criarRepositorioDeDispositivos({
+      banco,
+      ttlMs: env.NOTIFY_DEVICE_TTL_MS,
+      pepper: pepperDeNotificacao,
+    }),
+    ...(medidorDeNotificacoes ? { medidor: medidorDeNotificacoes } : {}),
+    aoFalhar: (erro) => {
+      logger.warn({ err: erro, evento: 'notification.notificador_falhou' }, 'aviso não saiu');
+    },
+  });
+
+  /**
+   * O que os sete módulos recebem daqui para baixo. O nome continua `auditoria` de
+   * propósito: quem injeta não precisa saber que há detecção nem notificação no caminho.
+   *
+   * A ordem da pilha importa: a trilha é o fato, e as duas camadas acima dela são derivadas.
+   * Cada decorador aguarda o de baixo e dispara o próprio observador sem aguardar, então
+   * nenhuma das duas entra no caminho crítico de quem só quer entrar.
+   */
+  /**
    * Detecção de eventos de segurança.
    *
    * O registrador que os sete módulos recebem é o **decorado**: ele grava na trilha e, no
@@ -317,21 +416,16 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
     silencio: contadorDeLimite,
     silencioMs: env.SECURITY_SILENCE_MS,
     retencaoMs: env.SECURITY_EVENT_TTL_MS,
-    canal: criarCanalDeAlertaEmLog(logger),
+    canal: canalDeAlerta,
     ...(medidorDeSeguranca ? { medidor: medidorDeSeguranca } : {}),
     aoFalhar: ({ erro }) => {
       logger.warn({ err: erro, evento: 'security.detector_falhou' }, 'regra de detecção falhou');
     },
   });
 
-  /**
-   * O que os sete módulos recebem daqui para baixo. O nome continua `auditoria` de
-   * propósito: quem injeta não precisa saber que há detecção no caminho, e o dia em que a
-   * detecção sair basta trocar esta linha.
-   */
-  const auditoria: RegistradorDeAuditoria = criarRegistradorComDeteccao(
-    registradorDaTrilha,
-    detector,
+  const auditoria: RegistradorDeAuditoria = criarRegistradorComNotificacao(
+    criarRegistradorComDeteccao(registradorDaTrilha, detector),
+    notificador,
   );
 
   const refreshTokenService = criarRefreshTokenService({
@@ -456,8 +550,17 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
     tokensDeReset: criarRepositorioDeTokenDeReset(banco),
     historico: criarRepositorioDeHistorico(pool),
     sessoes,
-    notificacao: criarCanalDeLog(logger),
-    ttlResetMin: 30,
+    // A porta da 009 finalmente tem concreto: sem NOTIFY_RESET_URL não há para onde
+    // apontar o link, e o log-fallback continua sendo o que sobra.
+    notificacao:
+      env.NOTIFY_RESET_URL === undefined
+        ? criarCanalDeLog(logger)
+        : criarCanalDeReset({
+            notificacoes,
+            urlDeReset: env.NOTIFY_RESET_URL,
+            validadeMin: TTL_RESET_MIN,
+          }),
+    ttlResetMin: TTL_RESET_MIN,
     historicoN: 3,
     auditoria,
   });
@@ -619,6 +722,13 @@ export function construirModulos(deps: DependenciasDaComposicao): ModulosDaAplic
     },
     seguranca: {
       eventos: eventosDeSeguranca,
+      guards,
+      verificarAccessToken,
+    },
+    notificacoes: {
+      notificacoes,
+      destinatarios: env.NOTIFY_OPERATOR_EMAILS,
+      transporte: env.NOTIFY_TRANSPORT,
       guards,
       verificarAccessToken,
     },

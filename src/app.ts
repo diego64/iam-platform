@@ -46,6 +46,7 @@ import { registrarRotasDeRbac } from './modules/rbac/index.js';
 import { registrarRotasDeAbac } from './modules/abac/index.js';
 import { registrarRotasDeClientes } from './modules/api-clients/index.js';
 import { registrarRotasDeAuditoria } from './modules/audit/index.js';
+import { registrarRotasDeNotificacoes } from './modules/notifications/index.js';
 import { registrarContextoDeRequisicao } from './plugins/request-context.js';
 import { registrarRotasDeChaves } from './modules/jwks/index.js';
 
@@ -389,6 +390,7 @@ export async function construirApp(
     registrarRotasDeClientes(app, modulos.clientes);
     registrarRotasDeAuditoria(app, modulos.auditoria);
     registrarRotasDeSeguranca(app, modulos.seguranca);
+    registrarRotasDeNotificacoes(app, modulos.notificacoes);
 
     // Ausente quando não há segredo mestre: sem ele o serviço de rotação não existe, e as
     // rotas administrativas de chave não teriam o que servir.

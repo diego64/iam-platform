@@ -16,9 +16,11 @@ import type { CanalDeNotificacao } from '../interfaces/notificacao.port.js';
  */
 export function criarCanalDeLog(logger: Logger): CanalDeNotificacao {
   return {
-    enviarReset(email: string): Promise<void> {
+    enviarReset(): Promise<void> {
+      // Sem o endereço: ele identifica quem pediu o reset, e um ambiente sem canal real é
+      // justamente onde ninguém está olhando para o que o log acumula.
       logger.warn(
-        { email, canal: 'log-fallback' },
+        { canal: 'log-fallback' },
         'password.reset.sem_canal_real — token gerado mas nenhum canal de entrega de e-mail configurado',
       );
       return Promise.resolve();

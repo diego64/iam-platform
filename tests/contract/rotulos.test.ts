@@ -15,6 +15,7 @@ import {
   type Telemetria,
 } from '../../src/telemetry/sdk.js';
 import { criarInstrumentos } from '../../src/telemetry/metricas.js';
+import { criarMedidorDeNotificacoes } from '../../src/modules/notifications/metrics/notifications.metrics.js';
 import { esquemaTelemetria } from '../../src/config/env.js';
 
 /** Rótulos previstos. Nada além disso pode aparecer. */
@@ -27,6 +28,12 @@ const ROTULOS_PERMITIDOS = new Set([
   'version',
   'commit',
   'node_version',
+  // Notificações: tipo do catálogo, desfecho da entrega e motivo do silêncio — os três de
+  // lista fechada. O destinatário nunca entra, nem em digest: rótulo multiplica série por
+  // usuário e fica retido por meses.
+  'tipo',
+  'resultado',
+  'motivo',
   // `le` é do formato de exposição de histograma, não um rótulo de negócio.
   'le',
 ]);
@@ -85,6 +92,16 @@ beforeAll(async () => {
 
   instrumentos.registrarTransicaoDeProntidao('postgres', 'down');
   instrumentos.registrarChecagemDeProntidao('mongo', 0.02);
+
+  // Notificações: o pior caso é o tipo que carrega destinatário. Aqui o medidor recebe um
+  // envio, uma falha e uma supressão — se algum dia alguém acrescentar o endereço a um
+  // rótulo, é nesta exposição que ele aparece.
+  const medidor = criarMedidorDeNotificacoes();
+  medidor.contarEnvio('login_novo', 'ok');
+  medidor.contarEnvio('reset_de_senha', 'erro');
+  medidor.contarFalha();
+  medidor.contarSupressao('login_novo', 'dispositivo_conhecido');
+  medidor.observarEntrega(0.2);
 });
 
 afterAll(async () => {
