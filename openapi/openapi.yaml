@@ -54,6 +54,13 @@ tags:
       alvo — bastaria inundar a coleção de eventos falsos para esconder o ataque real. O
       sujeito é sempre uma pista anonimizada; descobrir de quem se trata exige cruzar com a
       trilha, e esse cruzamento fica auditado.
+  - name: notifications
+    description: >-
+      Entrega de e-mails de segurança. Quase tudo aqui é saída: os avisos ao dono da conta
+      nascem de fatos já auditados e o alerta ao operador vem do detector. A única rota é a
+      de teste — sem ela, a primeira prova de que o transporte funciona seria o dia em que
+      um alerta real deveria ter saído e não saiu. Não há envio arbitrário (seria relay de
+      spam autenticado) nem histórico (o que saiu está no log e nas métricas).
   - name: oauth
     description: >-
       Superfície OAuth 2.0 (RFC 6749). O corpo é form-urlencoded e o erro segue o formato da
@@ -197,6 +204,34 @@ components:
           type: array
           items:
             type: string
+    ResultadoDeTesteDeNotificacao:
+      type: object
+      additionalProperties: false
+      required: [transporte, destinatarios, resultado, duracao_ms]
+      properties:
+        transporte:
+          type: string
+          enum: [log, http]
+          description: '`log` não manda nada para a rede — é o default de quem não configurou provedor.'
+        destinatarios:
+          type: integer
+          minimum: 0
+          description: Quantos endereços de operação receberam. Os endereços em si não voltam.
+        resultado:
+          type: string
+          enum: [ok, erro]
+        duracao_ms:
+          type: integer
+          minimum: 0
+        causa:
+          type: string
+          enum: [timeout, recusado, indisponivel, nao_configurado]
+          description: Presente só quando `resultado` é `erro`. Vocabulário fechado.
+      example:
+        transporte: http
+        destinatarios: 2
+        resultado: ok
+        duracao_ms: 214
     EventoDeSeguranca:
       type: object
       additionalProperties: false
@@ -1493,6 +1528,50 @@ paths:
                 $ref: '#/components/schemas/EventoDeSeguranca'
         '404':
           description: Evento não encontrado
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /notifications/test:
+    post:
+      tags: [notifications]
+      summary: Envia a mensagem de verificação aos endereços de operação
+      description: >
+        Corpo vazio: o destinatário sai de `NOTIFY_OPERATOR_EMAILS`, nunca da requisição —
+        um campo de endereço aqui transformaria a rota num relay de spam autenticado.
+        Falha do provedor responde 200 relatando a causa, porque o pedido estava certo e
+        quem falhou foi o provedor. A causa é de vocabulário fechado: a mensagem original
+        costuma ecoar a requisição, incluindo destinatário.
+      operationId: notificationsTest
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        '200':
+          description: Desfecho da tentativa de entrega
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultadoDeTesteDeNotificacao'
+        '403':
+          description: Sem a permissão notifications:send
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: Nenhum endereço de operação configurado
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '429':
+          description: Limite de 3/min excedido — a rota é diagnóstico, não canal
           content:
             application/problem+json:
               schema:
