@@ -11,7 +11,7 @@
  *    métodos deixaria de acontecer — sem erro, sem span, sem aviso.
  */
 import { createRequire } from 'node:module';
-import { diag, DiagLogLevel } from '@opentelemetry/api';
+import { diag, DiagLogLevel, metrics } from '@opentelemetry/api';
 import { NodeSDK, resources, tracing } from '@opentelemetry/sdk-node';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
@@ -80,22 +80,45 @@ function agregarFalhasDeExportacao(logger: Logger): () => void {
 }
 
 /**
- * Atributos que a instrumentação automática acrescenta e a SPEC proíbe.
+ * Atributos que a instrumentação automática acrescenta e não podem sair do processo.
  *
  * As instrumentações de `pg` e `mongodb` publicam `db.connection_string` — que carrega
  * host, porta e nome do banco — e `db.user`. Juntos, descrevem a topologia interna para
  * qualquer um com acesso ao backend de traces, e nada disso é necessário para responder
  * "por que esta requisição demorou".
+ *
+ * A instrumentação de HTTP publica a URL de quatro maneiras, e todas carregam a query
+ * string: por ali passam o código de autorização, o token de troca de senha e o parâmetro
+ * de continuação. Um trace fica retido e indexado por meses — muito além da validade do
+ * segredo que estaria ali dentro. O caminho útil para agrupar já está em `http.route`, que
+ * é o template registrado (`/users/:id`), sem valor de parâmetro e sem query.
  */
-const ATRIBUTOS_PROIBIDOS = ['db.connection_string', 'db.user'] as const;
+const ATRIBUTOS_PROIBIDOS = [
+  'db.connection_string',
+  'db.user',
+  'url.full',
+  'url.query',
+  'url.path',
+  'http.target',
+  'http.url',
+] as const;
 
 /**
  * Remove os atributos proibidos antes de o span sair do processo.
  *
  * Registrado ANTES do processor de lote: o lote guarda o span por referência e serializa
  * depois, então a limpeza precisa acontecer no `onEnd` que roda primeiro.
+ *
+ * Cada remoção é contada. Se o contador zerar depois de uma atualização do pacote de
+ * instrumentação, é porque o atributo mudou de nome — e o vazamento voltou sem que nenhum
+ * teste ou alerta tivesse mudado de cor.
  */
-function limparAtributosSensiveis(): tracing.SpanProcessor {
+export function limparAtributosSensiveis(): tracing.SpanProcessor {
+  // Com a telemetria desligada este é o meter no-op do OTel, e contar não custa nada.
+  const removidos = metrics.getMeter('iam-platform').createCounter('iam_span_attributes_scrubbed', {
+    description: 'Atributos removidos de spans antes da exportação',
+  });
+
   return {
     onStart: () => undefined,
     onEnd: (span) => {
@@ -103,6 +126,7 @@ function limparAtributosSensiveis(): tracing.SpanProcessor {
         if (chave in span.attributes) {
           // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
           delete (span.attributes as Record<string, unknown>)[chave];
+          removidos.add(1, { atributo: chave });
         }
       }
     },
