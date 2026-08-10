@@ -5,7 +5,12 @@
  * Regras: recebe a configuração e os serviços por injeção; nunca lê process.env, nunca
  *         abre socket e nunca conhece `pg` ou `mongodb`.
  */
-import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
+import Fastify, {
+  type FastifyError,
+  type FastifyInstance,
+  type FastifyReply,
+  type FastifyRequest,
+} from 'fastify';
 import fastifySwagger from '@fastify/swagger';
 import fastifySwaggerUi from '@fastify/swagger-ui';
 import fastifyRateLimit from '@fastify/rate-limit';
@@ -178,6 +183,27 @@ async function registrarModuloDeUsuarios(
   });
 }
 
+/**
+ * Traduz para problem+json os erros que o Fastify emite **antes** de haver rota: caminho
+ * longo demais, versão de cabeçalho inválida, corpo malformado no parser interno.
+ *
+ * Esses erros não passam pelo `setErrorHandler` — saem no formato do próprio framework,
+ * como `application/json`, fora do contrato da plataforma. No caso do caminho longo é pior
+ * que uma inconsistência de formato: o corpo default **ecoa de volta o caminho ofensivo
+ * inteiro**, devolvendo ao cliente a string que ele mesmo enviou.
+ */
+function responderErroDeFramework(
+  erro: FastifyError,
+  _requisicao: FastifyRequest,
+  resposta: FastifyReply,
+): void {
+  const status = erro.statusCode ?? 400;
+  void resposta
+    .status(status)
+    .type(TIPO_PROBLEM_JSON)
+    .send(montarProblema('request-error', 'Requisição inválida', status));
+}
+
 /** Prontidão degenerada: usada quando o app sobe sem dependências injetadas. */
 function prontidaoIndisponivel(): ServicoDeProntidao {
   return {
@@ -229,6 +255,15 @@ export async function construirApp(
     // investigação — seriam os únicos sem trace_id.
     logger: { level: env.LOG_LEVEL, mixin: contextoDeTrace },
     trustProxy: hopsDeProxyConfiaveis(env),
+    // Sem estes quatro, o processo fica nos defaults do Fastify: 1 MB de corpo, nenhum
+    // timeout de requisição e 100 caracteres de parâmetro. O que falta ali é o teto de
+    // requisição — um cliente abre a conexão, envia um byte por vez e segura o worker
+    // enquanto quiser, sem nunca estourar limite nenhum.
+    bodyLimit: env.HTTP_BODY_LIMIT_BYTES,
+    requestTimeout: env.HTTP_REQUEST_TIMEOUT_MS,
+    keepAliveTimeout: env.HTTP_KEEP_ALIVE_TIMEOUT_MS,
+    routerOptions: { maxParamLength: env.HTTP_MAX_PARAM_LENGTH },
+    frameworkErrors: responderErroDeFramework,
   });
 
   app.setValidatorCompiler(validatorCompiler);
