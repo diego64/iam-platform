@@ -12,5 +12,6 @@ skill-observations/
 !.env.example
 *.pem
 *.key
+backup-identity.txt
 security/sbom/*.json
 CLAUDE.md
