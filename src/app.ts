@@ -20,6 +20,11 @@ import type { ContadorDeRateLimit } from './shared/rate-limit/types.js';
 import fastifyHelmet from '@fastify/helmet';
 import fastifyCors from '@fastify/cors';
 import {
+  CABECALHOS_DA_DOCUMENTACAO,
+  CABECALHOS_DE_ERRO_SEM_ROTA,
+  CABECALHOS_DE_SEGURANCA,
+} from './shared/http/security-headers.js';
+import {
   jsonSchemaTransform,
   serializerCompiler,
   validatorCompiler,
@@ -56,6 +61,9 @@ import { registrarContextoDeRequisicao } from './plugins/request-context.js';
 import { registrarRotasDeChaves } from './modules/jwks/index.js';
 
 const TIPO_PROBLEM_JSON = 'application/problem+json';
+
+/** Prefixo da documentação interativa — só existe fora de produção. */
+const PREFIXO_DA_DOCUMENTACAO = '/docs';
 
 /** Uma rota efetivamente registrada nesta instância. */
 export interface RotaRegistrada {
@@ -200,6 +208,10 @@ function responderErroDeFramework(
   const status = erro.statusCode ?? 400;
   void resposta
     .status(status)
+    // Este caminho não passa por gancho nenhum — nem `onRequest`, onde o plugin escreve os
+    // cabeçalhos, nem `onSend`. Sem escrevê-los aqui, a resposta a uma requisição
+    // malformada sairia sem política de segurança alguma.
+    .headers(CABECALHOS_DE_ERRO_SEM_ROTA)
     .type(TIPO_PROBLEM_JSON)
     .send(montarProblema('request-error', 'Requisição inválida', status));
 }
@@ -285,6 +297,24 @@ export async function construirApp(
     }
   });
 
+  /**
+   * Política relaxada só para a documentação, pela configuração por rota do próprio helmet.
+   *
+   * O caminho óbvio — registrar a UI num escopo com um helmet próprio — não funciona: o
+   * plugin é publicado com `fastify-plugin`, então um registro aninhado escapa do escopo e
+   * sobrescreve a configuração global em vez de conviver com ela. A configuração por rota é
+   * o mecanismo que o plugin oferece para exatamente isto, e não vaza: só as rotas que
+   * casam o prefixo recebem a sobreposição.
+   *
+   * Precisa estar aqui, antes do registro da UI: o gancho vale para as rotas declaradas
+   * depois dele.
+   */
+  app.addHook('onRoute', (opcoes) => {
+    if (opcoes.url.startsWith(PREFIXO_DA_DOCUMENTACAO)) {
+      opcoes.config = { ...opcoes.config, helmet: CABECALHOS_DA_DOCUMENTACAO };
+    }
+  });
+
   await app.register(fastifySwagger, {
     openapi: {
       info: { title: 'iam-platform', version: '0.1.0' },
@@ -297,12 +327,13 @@ export async function construirApp(
     transform: jsonSchemaTransform,
   });
 
-  // A UI (e o /docs/json que vem com ela) publica a superfície inteira da API sem
+  // A UI (e o `/docs/json` que vem com ela) publica a superfície inteira da API sem pedir
+  // credencial — em produção isso é um mapa entregue de graça, e por isso ela não sobe lá.
   // O @fastify/swagger acima continua registrado em todo ambiente: ele só constrói o
   // documento em memória, sem expor rota — é o que alimenta app.swagger() e o teste de
   // contrato.
   if (env.NODE_ENV !== 'production') {
-    await app.register(fastifySwaggerUi, { routePrefix: '/docs' });
+    await app.register(fastifySwaggerUi, { routePrefix: PREFIXO_DA_DOCUMENTACAO });
   }
 
   /**
@@ -337,7 +368,7 @@ export async function construirApp(
         }),
   });
 
-  await app.register(fastifyHelmet);
+  await app.register(fastifyHelmet, CABECALHOS_DE_SEGURANCA);
 
   // Origem fechada por default. `origin: false` não emite cabeçalho de liberação nenhum,
   // então o navegador barra qualquer página que tente chamar esta API — que é o estado
