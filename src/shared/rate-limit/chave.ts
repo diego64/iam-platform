@@ -21,9 +21,21 @@ function normalizar(valor: string): string {
   return valor.trim().toLowerCase();
 }
 
-export function derivarChave(dimensao: DimensaoDeLimite, valor: string, pepper: string): string {
+/**
+ * @param escopo Recorte adicional dentro da dimensão — hoje, a rota. Vazio quando a cota é
+ *   da dimensão inteira, que é o caso das dimensões conta e cliente: a mesma conta atacada
+ *   por duas portas deve dividir o mesmo orçamento, senão espalhar o ataque entre endpoints
+ *   dobraria a cota do atacante. Na dimensão IP é o contrário, porque ali o teto é declarado
+ *   por rota — login e recuperação de senha têm números diferentes de propósito.
+ */
+export function derivarChave(
+  dimensao: DimensaoDeLimite,
+  valor: string,
+  pepper: string,
+  escopo = '',
+): string {
   const digest = createHash('sha256')
-    .update(`${dimensao}:${normalizar(valor)}:${pepper}`, 'utf8')
+    .update(`${dimensao}:${escopo}:${normalizar(valor)}:${pepper}`, 'utf8')
     .digest('hex');
   // O prefixo legível fica **fora** do material hasheado: serve para depurar a coleção e para
   // expurgo manual por dimensão, sem devolver nada sobre o identificador.
