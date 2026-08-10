@@ -24,6 +24,7 @@ import {
   CABECALHOS_DE_ERRO_SEM_ROTA,
   CABECALHOS_DE_SEGURANCA,
 } from './shared/http/security-headers.js';
+import { registrarControleDeCache } from './shared/http/cache-control.js';
 import {
   jsonSchemaTransform,
   serializerCompiler,
@@ -369,6 +370,10 @@ export async function construirApp(
   });
 
   await app.register(fastifyHelmet, CABECALHOS_DE_SEGURANCA);
+
+  // Depois do plugin, antes das rotas: o gancho vale para toda resposta que ainda não
+  // tenha decidido o próprio cache.
+  registrarControleDeCache(app);
 
   // Origem fechada por default. `origin: false` não emite cabeçalho de liberação nenhum,
   // então o navegador barra qualquer página que tente chamar esta API — que é o estado

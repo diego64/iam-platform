@@ -110,6 +110,46 @@ describe('transporte estrito', () => {
   });
 });
 
+describe('diretiva de cache', () => {
+  it('nenhuma resposta de credencial é guardável', async () => {
+    const resposta = await appCompleto.inject({
+      method: 'POST',
+      url: '/auth/login',
+      payload: { email: 'a@b.com', senha: 'S3nh@Forte!' },
+    });
+
+    expect(resposta.headers['cache-control']).toBe('no-store, no-cache, must-revalidate');
+    expect(resposta.headers['pragma']).toBe('no-cache');
+  });
+
+  it('o perfil autenticado também não é guardável', async () => {
+    const resposta = await appCompleto.inject({ method: 'GET', url: '/auth/me' });
+
+    expect(resposta.headers['cache-control']).toBe('no-store, no-cache, must-revalidate');
+  });
+
+  it('a chave pública continua cacheável — o gancho não sobrescreve quem já decidiu', async () => {
+    const resposta = await appCompleto.inject({
+      method: 'GET',
+      url: '/.well-known/jwks.json',
+    });
+
+    expect(resposta.headers['cache-control']).toBe('public, max-age=300');
+  });
+
+  it('o endpoint de token mantém o formato exigido pelo protocolo', async () => {
+    const resposta = await appCompleto.inject({
+      method: 'POST',
+      url: '/oauth/token',
+      payload: 'grant_type=client_credentials',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+
+    expect(resposta.headers['cache-control']).toContain('no-store');
+    expect(resposta.headers['pragma']).toBe('no-cache');
+  });
+});
+
 describe('escopo da documentação', () => {
   it('relaxa a política só em /docs, e não nas rotas de API da mesma instância', async () => {
     const dev = await construirApp(envDeTeste({ NODE_ENV: 'development' }));
