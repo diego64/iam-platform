@@ -93,6 +93,46 @@ describe('contador compartilhado entre instâncias', () => {
     expect(excedida.headers['retry-after']).toBeDefined();
   });
 
+  it('rotas diferentes não compartilham cota, nem entre instâncias', async () => {
+    const OUTRA_ROTA = '/teste/outro-limite';
+    async function montarComDuasRotas(): Promise<FastifyInstance> {
+      const app = Fastify({ logger: false });
+      await app.register((await import('@fastify/rate-limit')).default, {
+        global: false,
+        store: criarStoreDoPlugin({
+          contador: criarContadorNoMongo({ banco, timeoutMs: 500 }),
+          pepper: PEPPER,
+        }),
+      });
+      const limite = { config: { rateLimit: { max: TETO, timeWindow: '1 minute' } } };
+      app.get(ROTA_LIMITADA, limite, () => ({ ok: true }));
+      app.get(OUTRA_ROTA, limite, () => ({ ok: true }));
+      await app.ready();
+      return app;
+    }
+
+    const a = await montarComDuasRotas();
+    const b = await montarComDuasRotas();
+    const ip = '203.0.113.77';
+
+    // Esgota a cota de uma rota, distribuída entre as duas instâncias.
+    for (let i = 0; i < TETO; i += 1) {
+      await (i % 2 === 0 ? a : b).inject({ method: 'GET', url: ROTA_LIMITADA, remoteAddress: ip });
+    }
+
+    const excedida = await a.inject({ method: 'GET', url: ROTA_LIMITADA, remoteAddress: ip });
+    const outra = await b.inject({ method: 'GET', url: OUTRA_ROTA, remoteAddress: ip });
+
+    // As duas propriedades ao mesmo tempo: a cota da rota é da plataforma (por isso a
+    // sexta é barrada mesmo trocando de instância), e o recorte é por rota (por isso a
+    // rota vizinha continua livre).
+    expect(excedida.statusCode).toBe(429);
+    expect(outra.statusCode).toBe(200);
+
+    await a.close();
+    await b.close();
+  });
+
   it('IPs diferentes não compartilham cota', async () => {
     const contador = criarContadorNoMongo({ banco, timeoutMs: 500 });
     const app = await subir(contador);
