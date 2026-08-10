@@ -378,6 +378,56 @@ export const esquemaEnv = z.object({
   // trilha de milhões prende um processo e ainda entrega uma resposta que ninguém espera.
   AUDIT_INTEGRITY_MAX_WINDOW: z.coerce.number().int().min(100).max(1_000_000).default(50_000),
 
+  // Entrega de notificação (SPEC 019). O default é `log`: um ambiente que subiu sem
+  // provedor configurado não manda nada para lugar nenhum, em vez de falhar na primeira
+  // tentativa de entrega. Trocar para `http` exige URL, token, remetente e URL de reset —
+  // conferido em validarCoerencia, porque é relação entre variáveis.
+  NOTIFY_TRANSPORT: z.enum(['log', 'http']).default('log'),
+  // Só https: a mensagem carrega token de reset, e o destino é configuração de operação —
+  // não há caso legítimo de entregá-la em claro na rede.
+  NOTIFY_HTTP_URL: z.string().url().startsWith('https://').optional(),
+  NOTIFY_HTTP_TOKEN: z.string().min(16).optional(),
+  NOTIFY_FROM: z.string().email().max(254).optional(),
+  // Teto do fetch. Sem ele, um provedor lento não derruba o processo — acumula promessas
+  // presas, que é a mesma coisa mais devagar.
+  NOTIFY_TIMEOUT_MS: z.coerce.number().int().min(100).max(60_000).default(5_000),
+  // Teto de mensagens por destinatário por hora. É o que impede que "esqueci minha senha"
+  // vire um botão de inundar a caixa de entrada de qualquer usuário conhecido — o limite
+  // por IP da SPEC 016 não alcança o atacante distribuído, porque a vítima é a mesma.
+  NOTIFY_MAX_PER_HOUR: z.coerce.number().int().min(1).max(100).default(5),
+  // Por quanto tempo um dispositivo continua "conhecido" depois do último uso. Curto demais
+  // avisa o dono a cada duas semanas e ensina a ignorar; longo demais deixa mudo o retorno
+  // de quem entrou uma vez.
+  NOTIFY_DEVICE_TTL_MS: z.coerce
+    .number()
+    .int()
+    .min(60_000)
+    .default(90 * 24 * 60 * 60 * 1000),
+  // Deriva o digest do dispositivo. Separado do AUDIT_HINT_PEPPER de propósito: aquele é
+  // perpétuo, para não quebrar a correlação histórica da trilha, e este pode ser rotacionado
+  // — o efeito é um aviso de "novo dispositivo" na primeira entrada seguinte de cada um.
+  NOTIFY_DEVICE_PEPPER: z.string().min(32).optional(),
+  // Para quem vai o alerta de segurança. Ausente, o canal de e-mail não é montado e o
+  // log-fallback da SPEC 014 permanece — silêncio explícito, não falha.
+  NOTIFY_OPERATOR_EMAILS: z
+    .string()
+    .optional()
+    .transform((valor) =>
+      valor === undefined
+        ? []
+        : valor
+            .split(',')
+            .map((endereco) => endereco.trim())
+            .filter((endereco) => endereco.length > 0),
+    )
+    .pipe(z.array(z.string().email().max(254)).max(20)),
+  // Piso de severidade do alerta ao operador. Abaixo dele o evento segue só para log e
+  // métrica: caixa de entrada inundada é caixa de entrada ignorada.
+  NOTIFY_SECURITY_MIN_SEVERITY: z.enum(['baixa', 'media', 'alta']).default('alta'),
+  // Base do link de redefinição. Vive fora deste serviço — é a página que coleta a senha
+  // nova —, então não há default plausível.
+  NOTIFY_RESET_URL: z.string().url().startsWith('https://').optional(),
+
   // Admin de bootstrap (SPEC 002). Opcionais: presentes, o server cria o primeiro admin
   // na subida (idempotente); ausentes, nada acontece. A senha nunca é logada — só o nome
   // e o motivo, como toda variável sensível deste schema.
@@ -483,6 +533,24 @@ export function validarCoerencia(env: Env): ProblemaDeVariavel[] {
       nome: 'JWKS_CACHE_TTL_MS',
       problema: 'precisa ser menor que JWKS_GRACE_PERIOD_MS (rotação sem downtime)',
     });
+  }
+
+  // Transporte de e-mail pela metade é pior que transporte nenhum: o processo sobe, o
+  // ambiente parece configurado, e a falta só aparece no dia em que o primeiro aviso de
+  // segurança deveria ter saído. Todas as quatro faltas são relatadas de uma vez.
+  if (env.NOTIFY_TRANSPORT === 'http') {
+    const obrigatorias = [
+      ['NOTIFY_HTTP_URL', env.NOTIFY_HTTP_URL],
+      ['NOTIFY_HTTP_TOKEN', env.NOTIFY_HTTP_TOKEN],
+      ['NOTIFY_FROM', env.NOTIFY_FROM],
+      ['NOTIFY_RESET_URL', env.NOTIFY_RESET_URL],
+    ] as const;
+
+    for (const [nome, valor] of obrigatorias) {
+      if (valor === undefined) {
+        problemas.push({ nome, problema: 'obrigatória quando NOTIFY_TRANSPORT=http' });
+      }
+    }
   }
 
   return problemas;

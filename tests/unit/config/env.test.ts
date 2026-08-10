@@ -493,3 +493,81 @@ describe('carregarEnv — auditoria', () => {
     expect(JSON.stringify(erro.variaveis)).not.toContain('segredo-curto');
   });
 });
+
+describe('carregarEnv — notificações (SPEC 019)', () => {
+  const HTTP = {
+    NOTIFY_TRANSPORT: 'http',
+    NOTIFY_HTTP_URL: 'https://api.provedor.exemplo/emails',
+    NOTIFY_HTTP_TOKEN: 'token-do-provedor-com-16+',
+    NOTIFY_FROM: 'seguranca@iam.local',
+    NOTIFY_RESET_URL: 'https://conta.exemplo.com/redefinir',
+  };
+
+  it('sobe em modo log por padrão — ambiente sem provedor não manda nada', () => {
+    const env = carregarEnv(fonteValida());
+
+    expect(env.NOTIFY_TRANSPORT).toBe('log');
+    expect(env.NOTIFY_MAX_PER_HOUR).toBe(5);
+    expect(env.NOTIFY_TIMEOUT_MS).toBe(5_000);
+    expect(env.NOTIFY_SECURITY_MIN_SEVERITY).toBe('alta');
+    expect(env.NOTIFY_OPERATOR_EMAILS).toEqual([]);
+  });
+
+  it('exige URL, token, remetente e URL de reset quando o transporte é http', () => {
+    const erro = capturarErro(fonteValida({ NOTIFY_TRANSPORT: 'http' }));
+
+    // As quatro de uma vez: descobrir uma por deploy é o que a agregação existe para evitar.
+    expect(erro.variaveis.map((v) => v.nome)).toEqual([
+      'NOTIFY_HTTP_URL',
+      'NOTIFY_HTTP_TOKEN',
+      'NOTIFY_FROM',
+      'NOTIFY_RESET_URL',
+    ]);
+  });
+
+  it('aceita a configuração completa de http', () => {
+    const env = carregarEnv(fonteValida(HTTP));
+
+    expect(env.NOTIFY_TRANSPORT).toBe('http');
+    expect(env.NOTIFY_HTTP_URL).toBe(HTTP.NOTIFY_HTTP_URL);
+  });
+
+  it('recusa endpoint em claro: a mensagem carrega token de reset', () => {
+    const erro = capturarErro(
+      fonteValida({ ...HTTP, NOTIFY_HTTP_URL: 'http://api.provedor.exemplo/emails' }),
+    );
+
+    expect(erro.variaveis.map((v) => v.nome)).toContain('NOTIFY_HTTP_URL');
+  });
+
+  it('divide a lista de endereços de operação e valida cada um', () => {
+    const env = carregarEnv(
+      fonteValida({ NOTIFY_OPERATOR_EMAILS: ' seg@exemplo.com , plantao@exemplo.com ' }),
+    );
+
+    expect(env.NOTIFY_OPERATOR_EMAILS).toEqual(['seg@exemplo.com', 'plantao@exemplo.com']);
+  });
+
+  it('recusa endereço inválido no meio da lista', () => {
+    const erro = capturarErro(
+      fonteValida({ NOTIFY_OPERATOR_EMAILS: 'seg@exemplo.com,nao-e-email' }),
+    );
+
+    expect(erro.variaveis.map((v) => v.nome).join()).toContain('NOTIFY_OPERATOR_EMAILS');
+  });
+
+  it('recusa pepper de dispositivo curto demais', () => {
+    const erro = capturarErro(fonteValida({ NOTIFY_DEVICE_PEPPER: 'curto' }));
+
+    expect(erro.variaveis.map((v) => v.nome)).toContain('NOTIFY_DEVICE_PEPPER');
+  });
+
+  it('não deixa o token do provedor aparecer na descrição do erro', () => {
+    const erro = capturarErro(
+      fonteValida({ ...HTTP, NOTIFY_HTTP_TOKEN: 'curto', NOTIFY_FROM: 'nao-e-email' }),
+    );
+
+    expect(JSON.stringify(erro.variaveis)).not.toContain('curto');
+    expect(JSON.stringify(erro.variaveis)).not.toContain('nao-e-email');
+  });
+});
