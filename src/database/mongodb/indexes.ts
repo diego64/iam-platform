@@ -51,6 +51,13 @@ export async function garantirIndices(banco: Db): Promise<void> {
   await banco
     .collection('security_distinct_sets')
     .createIndexes([{ key: { expires_at: 1 }, expireAfterSeconds: 0 }]);
+  // Dispositivos já vistos por usuário (aviso de acesso novo). A chave é o `_id` — o digest
+  // do dispositivo —, então o único índice a criar é o TTL. Ele é deslizante: `expires_at` é
+  // regravado a cada aparição, para que quem usa o mesmo navegador todo dia não receba um
+  // "novo dispositivo" falso a cada vencimento.
+  await banco
+    .collection('known_devices')
+    .createIndexes([{ key: { expires_at: 1 }, expireAfterSeconds: 0 }]);
   // Trilha de auditoria. `seq` único é o que denuncia buraco na cadeia, e `event_id` único
   // torna a reemissão do mesmo evento inofensiva. Os três índices de consulta cobrem os
   // filtros da leitura (tipo, ator, alvo), sempre com recorte por tempo.
