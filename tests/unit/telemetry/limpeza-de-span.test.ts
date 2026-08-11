@@ -28,11 +28,10 @@ describe('atributos de URL', () => {
     expect(atributos).not.toHaveProperty('url.full');
   });
 
-  it('remove todas as formas em que a URL é publicada', () => {
+  it('remove todas as formas que carregam query string', () => {
     const atributos: Record<string, unknown> = {
       'url.full': `/x?token=${TOKEN}`,
       'url.query': `token=${TOKEN}`,
-      'url.path': '/auth/password/reset',
       'http.target': `/x?token=${TOKEN}`,
       'http.url': `/x?token=${TOKEN}`,
     };
@@ -40,6 +39,16 @@ describe('atributos de URL', () => {
     limparAtributosSensiveis().onEnd(spanCom(atributos));
 
     expect(Object.keys(atributos)).toEqual([]);
+  });
+
+  it('preserva `url.path`, que não carrega query e é o que sobra num 404', () => {
+    // Requisição não roteada não tem `http.route`. Sem `url.path`, o span diria que houve um
+    // 404 sem dizer para quê — diagnóstico zero pelo preço de nenhuma proteção.
+    const atributos = { 'url.path': '/rota/inexistente', 'url.full': '/rota/inexistente?a=1' };
+
+    limparAtributosSensiveis().onEnd(spanCom(atributos));
+
+    expect(atributos).toEqual({ 'url.path': '/rota/inexistente' });
   });
 
   it('nenhum valor do span exportado contém o segredo', () => {

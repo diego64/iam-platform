@@ -88,17 +88,25 @@ function agregarFalhasDeExportacao(logger: Logger): () => void {
  * "por que esta requisição demorou".
  *
  * A instrumentação de HTTP publica a URL de quatro maneiras, e todas carregam a query
- * string: por ali passam o código de autorização, o token de troca de senha e o parâmetro
- * de continuação. Um trace fica retido e indexado por meses — muito além da validade do
- * segredo que estaria ali dentro. O caminho útil para agrupar já está em `http.route`, que
- * é o template registrado (`/users/:id`), sem valor de parâmetro e sem query.
+ * string. Hoje nenhuma rota desta API lê parâmetro de query — o token de troca de senha
+ * chega no corpo, e não existe fluxo de autorização com `code` na URL. A remoção é defesa
+ * em profundidade por dois motivos concretos, não por um vazamento em curso:
+ *
+ *  1. O que trafega de fato nesses atributos é o **valor** do parâmetro de caminho — o UUID
+ *     do usuário em `/users/{id}`. Identificador de pessoa retido e indexado num backend de
+ *     traces por meses é dado pessoal onde ninguém foi procurar.
+ *  2. A primeira rota que aceitar query vazaria em silêncio. Ligar a proteção depois do
+ *     fato exige lembrar dela no momento certo; ligada agora, ela já está lá.
+ *
+ * `url.path` fica de fora da lista de propósito. Ele não carrega query, e é a única
+ * informação de caminho que sobra numa requisição **não roteada** — 404 e 414 não têm
+ * `http.route`, e sem `url.path` o span diria que houve um 404 sem dizer para quê.
  */
 const ATRIBUTOS_PROIBIDOS = [
   'db.connection_string',
   'db.user',
   'url.full',
   'url.query',
-  'url.path',
   'http.target',
   'http.url',
 ] as const;

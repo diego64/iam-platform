@@ -67,10 +67,10 @@ describe('ordem dos processadores de span', () => {
     expect(lote).toBeGreaterThan(limpeza);
   });
 
-  it('a lista de atributos proibidos cobre todas as formas da URL', () => {
-    // Por estes atributos passa a query string, e nela o código de autorização e o token
-    // de troca de senha. Encolher a lista precisa reprovar aqui.
-    for (const atributo of ['url.full', 'url.query', 'url.path', 'http.target', 'http.url']) {
+  it('a lista de atributos proibidos cobre todas as formas que carregam query', () => {
+    // Por estes atributos passa a query string — e, hoje, o valor do parâmetro de caminho.
+    // Encolher a lista precisa reprovar aqui.
+    for (const atributo of ['url.full', 'url.query', 'http.target', 'http.url']) {
       expect(sdk).toContain(`'${atributo}'`);
     }
   });
