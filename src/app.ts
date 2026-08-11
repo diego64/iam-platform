@@ -201,17 +201,49 @@ async function registrarModuloDeUsuarios(
  * que uma inconsistência de formato: o corpo default **ecoa de volta o caminho ofensivo
  * inteiro**, devolvendo ao cliente a string que ele mesmo enviou.
  */
-function responderErroDeFramework(
+export function responderErroDeFramework(
   erro: FastifyError,
-  _requisicao: FastifyRequest,
+  requisicao: FastifyRequest,
   resposta: FastifyReply,
 ): void {
   const status = erro.statusCode ?? 400;
+
+  /**
+   * Sem registro a borda fica muda: requisição malformada, caminho gigante e varredura de
+   * URL não deixam sinal em nível nenhum. É onde a sondagem chega primeiro, e é da ausência
+   * de sinal aqui que a detecção de abuso não tem como suspeitar.
+   *
+   * Só o código, o status e o método — nunca `err`. A mensagem e o stack destes erros
+   * **embutem a string recebida do cliente**: registrar o objeto inteiro devolveria ao log o
+   * mesmo caminho ofensivo que a resposta deixou de ecoar, e o log fica retido muito mais
+   * tempo que a requisição. O código já diz o que aconteceu; o valor não acrescenta nada
+   * que valha carregar.
+   */
+  const evento = {
+    evento: 'erro_de_framework',
+    codigo: erro.code,
+    status,
+    metodo: requisicao.method,
+  };
+
+  if (status >= 500) {
+    requisicao.log.error(evento, 'erro de framework antes do roteamento');
+    void resposta
+      .status(status)
+      .headers(CABECALHOS_DE_ERRO_SEM_ROTA)
+      .type(TIPO_PROBLEM_JSON)
+      // O mesmo tipo que o handler global usa acima de 500: um erro de servidor rotulado
+      // como erro de requisição manda o cliente procurar defeito no que ele enviou.
+      .send(montarProblema('internal-error', 'Erro interno', status));
+    return;
+  }
+
+  requisicao.log.warn(evento, 'requisição recusada antes do roteamento');
   void resposta
     .status(status)
     // Este caminho não passa por gancho nenhum — nem `onRequest`, onde o plugin escreve os
-    // cabeçalhos, nem `onSend`. Sem escrevê-los aqui, a resposta a uma requisição
-    // malformada sairia sem política de segurança alguma.
+    // cabeçalhos, nem `onSend`, onde o controle de cache decide. Sem escrevê-los aqui, a
+    // resposta a uma requisição malformada sairia sem política de segurança alguma.
     .headers(CABECALHOS_DE_ERRO_SEM_ROTA)
     .type(TIPO_PROBLEM_JSON)
     .send(montarProblema('request-error', 'Requisição inválida', status));
@@ -404,6 +436,15 @@ export async function construirApp(
     }
 
     const status = erro.statusCode ?? 500;
+
+    // O corpo grande demais é recusado pelo parser e chega aqui já com 413. Contar é o que
+    // separa "o teto está protegendo" de "o teto está apertado demais e mordendo tráfego
+    // legítimo" — sem a série, um teto errado aparece só como erro do lado do cliente.
+    if (status === 413 && dependencias.telemetria?.exportadorPrometheus !== undefined) {
+      obterInstrumentos(env.GIT_COMMIT).registrarCorpoRecusado(
+        rotuloDeRota(requisicao.routeOptions.url),
+      );
+    }
 
     if (status >= 500) {
       requisicao.log.error({ err: erro }, 'erro não tratado');

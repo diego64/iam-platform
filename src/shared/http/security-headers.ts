@@ -46,9 +46,14 @@ const POLITICA_DE_CONTEUDO = {
 /**
  * Política relaxada do Swagger UI, que é HTML com script e estilo embutidos.
  *
- * Só existe fora de produção e só vale dentro do escopo onde a documentação é registrada —
- * o encapsulamento do Fastify faz a sobreposição morrer na fronteira daquele escopo, e as
- * rotas de API continuam sob a política que nega tudo.
+ * Só existe fora de produção, e alcança apenas as rotas sob o prefixo da documentação: quem
+ * a aplica é um gancho `onRoute` que escreve `config.helmet` naquelas rotas, mecanismo de
+ * sobreposição por rota do próprio plugin.
+ *
+ * **Não** tente trocar isso por um registro aninhado com opções próprias. O plugin é
+ * publicado com `fastify-plugin`, então o registro escapa do escopo e **sobrescreve a
+ * configuração global** — o afrouxamento vazaria para a API inteira, que é o oposto da
+ * intenção, e sem sintoma visível.
  */
 const POLITICA_DA_DOCUMENTACAO = {
   'default-src': ["'self'"],
