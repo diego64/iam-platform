@@ -14,7 +14,7 @@ import type { FastifyInstance } from 'fastify';
  * endpoint de token de OAuth é obrigado a emiti-lo, ele já o emitia por conta própria, e
  * uniformizar sai mais barato que manter a exceção documentada em dois lugares.
  */
-const SEM_ARMAZENAMENTO = 'no-store, no-cache, must-revalidate';
+export const SEM_ARMAZENAMENTO = 'no-store, no-cache, must-revalidate';
 
 /**
  * As únicas rotas cujo conteúdo pode ser guardado por um intermediário.
@@ -26,7 +26,7 @@ const SEM_ARMAZENAMENTO = 'no-store, no-cache, must-revalidate';
  * metadados já definem o próprio cache no handler, e o gancho não as sobrescreve. A lista
  * existe para o caso de alguma delas parar de definir.
  */
-const CACHEAVEIS: ReadonlyMap<string, string> = new Map([
+export const CACHEAVEIS: ReadonlyMap<string, string> = new Map([
   // Chave pública de verificação: material público por definição, e cacheá-la é o que
   // evita que todo microsserviço consumidor bata aqui a cada token validado.
   ['/.well-known/jwks.json', 'public, max-age=300'],

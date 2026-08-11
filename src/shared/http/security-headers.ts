@@ -6,6 +6,7 @@
  *  - Escrita por extenso, nunca herdada. Ver o comentário da política de conteúdo.
  */
 import type { FastifyHelmetOptions } from '@fastify/helmet';
+import { SEM_ARMAZENAMENTO } from './cache-control.js';
 
 declare module 'fastify' {
   interface FastifyContextConfig {
@@ -20,7 +21,12 @@ declare module 'fastify' {
   }
 }
 
-/** Dois anos, o piso pedido por quem mantém a lista de pré-carga dos navegadores. */
+/**
+ * Dois anos — o dobro do piso de um ano (31 536 000) exigido por quem mantém a lista de
+ * pré-carga dos navegadores. Prazo longo importa porque o cabeçalho só protege quem já
+ * visitou: quanto maior a validade, menor a chance de a memória do navegador ter expirado
+ * antes da próxima visita.
+ */
 const HSTS_MAX_AGE_SEGUNDOS = 63_072_000;
 
 /**
@@ -103,16 +109,17 @@ function serializarPolitica(politica: Readonly<Record<string, readonly string[]>
 }
 
 /**
- * Os mesmos cabeçalhos, prontos para serem escritos à mão.
+ * Tudo o que os ganchos escreveriam, pronto para ser escrito à mão.
  *
- * Existem porque o Fastify emite alguns erros **antes de haver rota** — caminho longo
- * demais, versão de cabeçalho inválida — e esse caminho não passa por gancho nenhum: nem
- * `onRequest`, onde o plugin aplica os cabeçalhos, nem `onSend`. Sem isto, justamente as
- * respostas a requisições malformadas sairiam sem política alguma.
+ * Existe porque o Fastify emite alguns erros **antes de haver rota** — caminho longo demais,
+ * versão de cabeçalho inválida — e esse caminho não passa por gancho nenhum: nem
+ * `onRequest`, onde o plugin aplica a política, nem `onSend`, onde o controle de cache
+ * decide. Sem isto, justamente as respostas a requisições malformadas sairiam sem política
+ * alguma **e** guardáveis por qualquer intermediário.
  *
- * Derivados das mesmas constantes acima, não copiados: uma diretiva que mude ali muda aqui
- * junto, e o teste compara os dois lados para o caso de alguém acrescentar um cabeçalho só
- * de um lado.
+ * A política de conteúdo e o prazo de transporte são derivados das constantes acima, não
+ * copiados: uma diretiva que mude ali muda aqui junto, e o teste compara os dois lados para
+ * o caso de alguém acrescentar um cabeçalho só de um lado.
  */
 export const CABECALHOS_DE_ERRO_SEM_ROTA: Readonly<Record<string, string>> = {
   'content-security-policy': serializarPolitica(POLITICA_DE_CONTEUDO),
@@ -123,6 +130,10 @@ export const CABECALHOS_DE_ERRO_SEM_ROTA: Readonly<Record<string, string>> = {
   'cross-origin-resource-policy': 'same-origin',
   'cross-origin-opener-policy': 'same-origin',
   'x-permitted-cross-domain-policies': 'none',
+  // Um 4xx não carrega segredo, mas é resposta como qualquer outra: a regra é que só rota
+  // declarada como pública seja guardável, e nenhuma delas chega por este caminho.
+  'cache-control': SEM_ARMAZENAMENTO,
+  pragma: 'no-cache',
 };
 
 /** Opções do helmet para o escopo da documentação — ver `POLITICA_DA_DOCUMENTACAO`. */

@@ -5,7 +5,7 @@
  * é contornável trocando um header, e o teste de rate limit ainda assim passaria.
  */
 import { describe, expect, it } from 'vitest';
-import { hopsDeProxyConfiaveis } from '../../../src/app.js';
+import { ehRotaDaDocumentacao, hopsDeProxyConfiaveis } from '../../../src/app.js';
 import { carregarEnv } from '../../../src/config/env.js';
 
 function envCom(ambiente: string): ReturnType<typeof carregarEnv> {
@@ -31,5 +31,27 @@ describe('hopsDeProxyConfiaveis', () => {
 
   it('não confia em header algum em teste', () => {
     expect(hopsDeProxyConfiaveis(envCom('test'))).toBe(false);
+  });
+});
+
+describe('ehRotaDaDocumentacao — alcance da política relaxada', () => {
+  it('reconhece a raiz da documentação e o que está sob ela', () => {
+    expect(ehRotaDaDocumentacao('/docs')).toBe(true);
+    expect(ehRotaDaDocumentacao('/docs/json')).toBe(true);
+    expect(ehRotaDaDocumentacao('/docs/static/index.css')).toBe(true);
+  });
+
+  it('não alcança rota que apenas começa com as mesmas letras', () => {
+    // Prefixo solto casaria estas, e elas herdariam em silêncio a política relaxada da UI:
+    // a rota responde normalmente, só com menos proteção, e nada avisa.
+    expect(ehRotaDaDocumentacao('/docs-interno')).toBe(false);
+    expect(ehRotaDaDocumentacao('/docsearch')).toBe(false);
+    expect(ehRotaDaDocumentacao('/documentos')).toBe(false);
+  });
+
+  it('não alcança as rotas de API', () => {
+    for (const caminho of ['/auth/login', '/health/live', '/.well-known/jwks.json']) {
+      expect(ehRotaDaDocumentacao(caminho)).toBe(false);
+    }
   });
 });

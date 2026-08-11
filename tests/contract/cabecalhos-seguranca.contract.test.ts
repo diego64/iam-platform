@@ -10,8 +10,10 @@
  * ninguém reparar.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, InjectOptions } from 'fastify';
 import { montarAppCompleto } from '../mocks/app-completo.js';
+import { ehRotaDaDocumentacao } from '../../src/app.js';
+import { CACHEAVEIS } from '../../src/shared/http/cache-control.js';
 
 /** O que precisa sair em toda resposta, qualquer que seja o status. */
 const OBRIGATORIOS: ReadonlyMap<string, string> = new Map([
@@ -31,8 +33,16 @@ const OBRIGATORIOS: ReadonlyMap<string, string> = new Map([
  * navegador, sem handler nosso por trás.
  */
 function souRotaDeApi(caminho: string): boolean {
-  return !caminho.startsWith('/docs') && caminho !== '*';
+  return !ehRotaDaDocumentacao(caminho) && caminho !== '*';
 }
+
+/**
+ * Verbo no tipo que a injeção aceita.
+ *
+ * O `HTTPMethods` do Fastify é mais largo que o da injeção — usá-lo aqui derruba a resolução
+ * de sobrecarga, e a resposta volta tipada como encadeamento em vez de resposta.
+ */
+type MetodoDeInjecao = NonNullable<InjectOptions['method']>;
 
 /** Um caminho concreto a partir do template registrado: `/users/:id` → `/users/id`. */
 function caminhoConcreto(template: string): string {
@@ -65,7 +75,7 @@ describe('cabeçalhos em toda rota servida', () => {
       if (!souRotaDeApi(rota.caminho)) continue;
 
       const resposta = await app.inject({
-        method: rota.metodo as 'GET',
+        method: rota.metodo as MetodoDeInjecao,
         url: caminhoConcreto(rota.caminho),
       });
 
@@ -86,7 +96,7 @@ describe('cabeçalhos em toda rota servida', () => {
       if (!souRotaDeApi(rota.caminho)) continue;
 
       const resposta = await app.inject({
-        method: rota.metodo as 'GET',
+        method: rota.metodo as MetodoDeInjecao,
         url: caminhoConcreto(rota.caminho),
       });
       const politica = resposta.headers['content-security-policy'] ?? '';
@@ -101,22 +111,18 @@ describe('cabeçalhos em toda rota servida', () => {
 });
 
 describe('diretiva de cache em toda rota servida', () => {
-  /** As únicas rotas cujo conteúdo pode ser guardado por um intermediário. */
-  const CACHEAVEIS = new Set([
-    '/.well-known/jwks.json',
-    '/.well-known/oauth-authorization-server',
-    '/.well-known/openid-configuration',
-    '/.well-known/security.txt',
-  ]);
+  // A lista vem da fonte, não de uma cópia: duplicá-la aqui faria o teste verificar a
+  // própria cópia em vez da regra que o processo aplica.
+  const cacheavel = (caminho: string): boolean => CACHEAVEIS.has(caminho);
 
   it('nenhuma rota de credencial é guardável', async () => {
     const guardaveis: string[] = [];
 
     for (const rota of app.inventarioDeRotas) {
-      if (!souRotaDeApi(rota.caminho) || CACHEAVEIS.has(rota.caminho)) continue;
+      if (!souRotaDeApi(rota.caminho) || cacheavel(rota.caminho)) continue;
 
       const resposta = await app.inject({
-        method: rota.metodo as 'GET',
+        method: rota.metodo as MetodoDeInjecao,
         url: caminhoConcreto(rota.caminho),
       });
       const cache = resposta.headers['cache-control'] ?? '';
@@ -130,7 +136,7 @@ describe('diretiva de cache em toda rota servida', () => {
   });
 
   it('as rotas cacheáveis continuam cacheáveis — a regra não pode engolir o caso legítimo', async () => {
-    const servidas = app.inventarioDeRotas.filter((r) => CACHEAVEIS.has(r.caminho));
+    const servidas = app.inventarioDeRotas.filter((r) => cacheavel(r.caminho));
 
     expect(servidas.length).toBeGreaterThan(0);
 

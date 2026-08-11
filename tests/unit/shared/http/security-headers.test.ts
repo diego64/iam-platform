@@ -11,6 +11,7 @@ import {
   CABECALHOS_DE_ERRO_SEM_ROTA,
   CABECALHOS_DE_SEGURANCA,
 } from '../../../../src/shared/http/security-headers.js';
+import { SEM_ARMAZENAMENTO } from '../../../../src/shared/http/cache-control.js';
 
 /** Extrai as diretivas da política de conteúdo, falhando se o formato mudar. */
 function diretivas(opcoes: typeof CABECALHOS_DE_SEGURANCA): Record<string, readonly string[]> {
@@ -88,19 +89,28 @@ describe('cabeçalhos escritos à mão para o erro sem rota', () => {
     }
   });
 
-  it('cobre todo cabeçalho que o plugin aplica nas demais respostas', () => {
+  it('cobre tudo o que os ganchos escreveriam — política e diretiva de cache', () => {
     // Se alguém acrescentar um cabeçalho só às opções do plugin, este caso reprova — sem
     // ele, o caminho de erro sem rota fica para trás em silêncio.
     expect(Object.keys(CABECALHOS_DE_ERRO_SEM_ROTA).sort()).toEqual([
+      'cache-control',
       'content-security-policy',
       'cross-origin-opener-policy',
       'cross-origin-resource-policy',
+      'pragma',
       'referrer-policy',
       'strict-transport-security',
       'x-content-type-options',
       'x-frame-options',
       'x-permitted-cross-domain-policies',
     ]);
+  });
+
+  it('a resposta não é guardável, com a mesma diretiva do gancho de cache', () => {
+    // Nenhuma rota pública chega por este caminho, então o default sem armazenamento vale
+    // aqui como vale em qualquer rota não declarada.
+    expect(CABECALHOS_DE_ERRO_SEM_ROTA['cache-control']).toBe(SEM_ARMAZENAMENTO);
+    expect(CABECALHOS_DE_ERRO_SEM_ROTA['pragma']).toBe('no-cache');
   });
 
   it('repete o mesmo prazo de transporte estrito, sem pré-carga', () => {
@@ -130,5 +140,16 @@ describe('política da documentação', () => {
       CABECALHOS_DE_SEGURANCA.strictTransportSecurity,
     );
     expect(CABECALHOS_DA_DOCUMENTACAO.noSniff).toBe(true);
+  });
+});
+
+describe('transporte estrito — prazo', () => {
+  it('vai além do piso de um ano exigido pela lista de pré-carga', () => {
+    const hsts = CABECALHOS_DE_SEGURANCA.strictTransportSecurity as { maxAge: number };
+    const UM_ANO = 31_536_000;
+
+    // O cabeçalho só protege quem já visitou: prazo curto deixa a memória do navegador
+    // expirar antes da próxima visita, e a primeira requisição volta a poder sair em claro.
+    expect(hsts.maxAge).toBeGreaterThan(UM_ANO);
   });
 });

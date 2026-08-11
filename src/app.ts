@@ -66,6 +66,17 @@ const TIPO_PROBLEM_JSON = 'application/problem+json';
 /** Prefixo da documentação interativa — só existe fora de produção. */
 const PREFIXO_DA_DOCUMENTACAO = '/docs';
 
+/**
+ * `true` para a raiz da documentação e o que está sob ela — e só.
+ *
+ * Comparação de prefixo solta (`startsWith('/docs')`) casaria também `/docs-interno` ou
+ * `/docsearch`, que herdariam em silêncio a política relaxada da UI. Degradação de segurança
+ * por acidente de nome não avisa: a rota responde normalmente, só com menos proteção.
+ */
+export function ehRotaDaDocumentacao(caminho: string): boolean {
+  return caminho === PREFIXO_DA_DOCUMENTACAO || caminho.startsWith(`${PREFIXO_DA_DOCUMENTACAO}/`);
+}
+
 /** Uma rota efetivamente registrada nesta instância. */
 export interface RotaRegistrada {
   readonly metodo: string;
@@ -343,7 +354,7 @@ export async function construirApp(
    * depois dele.
    */
   app.addHook('onRoute', (opcoes) => {
-    if (opcoes.url.startsWith(PREFIXO_DA_DOCUMENTACAO)) {
+    if (ehRotaDaDocumentacao(opcoes.url)) {
       opcoes.config = { ...opcoes.config, helmet: CABECALHOS_DA_DOCUMENTACAO };
     }
   });
