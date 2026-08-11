@@ -31,13 +31,24 @@ export function envCompleta(sobrescritas: NodeJS.ProcessEnv = {}): Env {
 }
 
 export async function montarAppCompleto(env: Env = envCompleta()): Promise<FastifyInstance> {
-  const jwks = {
-    iniciar: vi.fn(),
+  /**
+   * Dublê do serviço de chaves, **tipado como o serviço**.
+   *
+   * Sem a anotação, um `as unknown as JwksService` aceitava qualquer forma: o dublê estubava
+   * `obterJwks` e `obterChaveDeAssinatura`, que não existem na interface, e deixava
+   * `obterConjuntoPublico` — o que o controller chama — sem implementação. O resultado era
+   * `GET /.well-known/jwks.json` respondendo 500 em todo teste que usa este app, sem que
+   * nenhuma asserção reprovasse. Anotado, o compilador acusa o próximo descompasso.
+   */
+  const jwks: JwksService = {
+    iniciar: () => Promise.resolve(),
     invalidar: vi.fn(),
-    obterConjuntoDeVerificacao: vi.fn(),
-    obterChaveDeAssinatura: vi.fn(),
-    obterJwks: vi.fn(() => Promise.resolve({ keys: [] })),
-  } as unknown as JwksService;
+    obterConjuntoDeVerificacao: () =>
+      Promise.reject(new Error('dublê sem conjunto de verificação: use um app com chaves')),
+    obterChaveAtiva: () =>
+      Promise.reject(new Error('dublê sem chave ativa: use um app com chaves')),
+    obterConjuntoPublico: () => Promise.resolve({ keys: [] }),
+  };
 
   const modulos = construirModulos({
     env,

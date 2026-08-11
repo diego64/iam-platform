@@ -59,7 +59,8 @@ export function registrarRotasDeRbac(app: FastifyInstance, deps: DependenciasDas
         body: criarPapelBody,
         response: { 201: respostaPapel },
       },
-      preHandler: [auth, exigirPermissao('roles:write')],
+      onRequest: auth,
+      preHandler: exigirPermissao('roles:write'),
     },
     (req, resp) => controller.criarPapel(req, resp),
   );
@@ -74,7 +75,8 @@ export function registrarRotasDeRbac(app: FastifyInstance, deps: DependenciasDas
         querystring: paginacaoQuery,
         response: { 200: respostaListaPapeis },
       },
-      preHandler: [auth, exigirPermissao('roles:read')],
+      onRequest: auth,
+      preHandler: exigirPermissao('roles:read'),
     },
     (req, resp) => controller.listarPapeis(req, resp),
   );
@@ -89,7 +91,8 @@ export function registrarRotasDeRbac(app: FastifyInstance, deps: DependenciasDas
         params: idParams,
         response: { 200: respostaPapelDetalhe },
       },
-      preHandler: [auth, exigirPermissao('roles:read')],
+      onRequest: auth,
+      preHandler: exigirPermissao('roles:read'),
     },
     (req, resp) => controller.obterPapel(req, resp),
   );
@@ -105,7 +108,8 @@ export function registrarRotasDeRbac(app: FastifyInstance, deps: DependenciasDas
         body: atualizarPapelBody,
         response: { 200: respostaPapel },
       },
-      preHandler: [auth, exigirPermissao('roles:write')],
+      onRequest: auth,
+      preHandler: exigirPermissao('roles:write'),
     },
     (req, resp) => controller.atualizarPapel(req, resp),
   );
@@ -119,7 +123,8 @@ export function registrarRotasDeRbac(app: FastifyInstance, deps: DependenciasDas
         security: seguranca,
         params: idParams,
       },
-      preHandler: [auth, exigirPermissao('roles:delete')],
+      onRequest: auth,
+      preHandler: exigirPermissao('roles:delete'),
     },
     (req, resp) => controller.removerPapel(req, resp),
   );
@@ -135,7 +140,8 @@ export function registrarRotasDeRbac(app: FastifyInstance, deps: DependenciasDas
         params: idParams,
         body: associarPermissoesBody,
       },
-      preHandler: [auth, exigirPapel('superadmin')],
+      onRequest: auth,
+      preHandler: exigirPapel('superadmin'),
     },
     (req, resp) => controller.associarPermissoes(req, resp),
   );
@@ -149,7 +155,8 @@ export function registrarRotasDeRbac(app: FastifyInstance, deps: DependenciasDas
         security: seguranca,
         params: roleComPermissaoParams,
       },
-      preHandler: [auth, exigirPermissao('roles:write')],
+      onRequest: auth,
+      preHandler: exigirPermissao('roles:write'),
     },
     (req, resp) => controller.desassociarPermissao(req, resp),
   );
@@ -165,7 +172,8 @@ export function registrarRotasDeRbac(app: FastifyInstance, deps: DependenciasDas
         body: criarPermissaoBody,
         response: { 201: respostaPermissao },
       },
-      preHandler: [auth, exigirPermissao('permissions:write')],
+      onRequest: auth,
+      preHandler: exigirPermissao('permissions:write'),
     },
     (req, resp) => controller.criarPermissao(req, resp),
   );
@@ -180,7 +188,8 @@ export function registrarRotasDeRbac(app: FastifyInstance, deps: DependenciasDas
         querystring: paginacaoQuery,
         response: { 200: respostaListaPermissoes },
       },
-      preHandler: [auth, exigirPermissao('permissions:read')],
+      onRequest: auth,
+      preHandler: exigirPermissao('permissions:read'),
     },
     (req, resp) => controller.listarPermissoes(req, resp),
   );
@@ -194,7 +203,8 @@ export function registrarRotasDeRbac(app: FastifyInstance, deps: DependenciasDas
         security: seguranca,
         params: idParams,
       },
-      preHandler: [auth, exigirPermissao('permissions:delete')],
+      onRequest: auth,
+      preHandler: exigirPermissao('permissions:delete'),
     },
     (req, resp) => controller.removerPermissao(req, resp),
   );
@@ -210,7 +220,8 @@ export function registrarRotasDeRbac(app: FastifyInstance, deps: DependenciasDas
         params: idParams,
         response: { 200: respostaPapeisDoUsuario },
       },
-      preHandler: [auth, exigirPermissao('roles:read')],
+      onRequest: auth,
+      preHandler: exigirPermissao('roles:read'),
     },
     (req, resp) => controller.listarPapeisDoUsuario(req, resp),
   );
@@ -225,7 +236,8 @@ export function registrarRotasDeRbac(app: FastifyInstance, deps: DependenciasDas
         params: idParams,
         body: atribuirPapeisBody,
       },
-      preHandler: [auth, exigirPapel('superadmin')],
+      onRequest: auth,
+      preHandler: exigirPapel('superadmin'),
     },
     (req, resp) => controller.atribuirPapeis(req, resp),
   );
@@ -239,7 +251,8 @@ export function registrarRotasDeRbac(app: FastifyInstance, deps: DependenciasDas
         security: seguranca,
         params: userComPapelParams,
       },
-      preHandler: [auth, exigirPapel('superadmin')],
+      onRequest: auth,
+      preHandler: exigirPapel('superadmin'),
     },
     (req, resp) => controller.desatribuirPapel(req, resp),
   );

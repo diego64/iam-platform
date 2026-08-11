@@ -42,6 +42,8 @@ export interface Instrumentos {
   registrarTransicaoDeProntidao(dependencia: string, para: string): void;
   /** Duração de uma checagem de dependência, transicionando ou não. */
   registrarChecagemDeProntidao(dependencia: string, duracaoSegundos: number): void;
+  /** Corpo recusado por exceder o teto, antes de qualquer parse. */
+  registrarCorpoRecusado(rota: string): void;
 }
 
 /**
@@ -77,6 +79,15 @@ export function criarInstrumentos(commit: string): Instrumentos {
     description: 'Transições de estado das dependências',
   });
 
+  /**
+   * Um pico aqui é cliente mal configurado ou sondagem — nos dois casos, é a diferença
+   * entre "ninguém consegue enviar isso" e um teto apertado demais mordendo tráfego real.
+   * Sem a série, um teto errado se manifesta como erro intermitente do lado do cliente.
+   */
+  const corposRecusados = meter.createCounter('iam_http_body_limit_exceeded', {
+    description: 'Requisições recusadas por corpo acima do teto',
+  });
+
   const duracaoDeChecagem = meter.createHistogram('iam_readiness_check_duration_seconds', {
     description: 'Duração das checagens de prontidão',
     unit: 's',
@@ -95,6 +106,10 @@ export function criarInstrumentos(commit: string): Instrumentos {
 
     registrarChecagemDeProntidao(dependencia, duracaoSegundos) {
       duracaoDeChecagem.record(duracaoSegundos, { dependencia });
+    },
+
+    registrarCorpoRecusado(rota) {
+      corposRecusados.add(1, { route: rota });
     },
   };
 }

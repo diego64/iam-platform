@@ -61,3 +61,7 @@ services:
         sync: false
       - key: MONGODB_URL
         sync: false
+      # Sem ele a trilha de auditoria não monta e o boot aborta. Valor permanente:
+      # trocar quebra a correlação com todos os eventos já gravados.
+      - key: AUDIT_HINT_PEPPER
+        sync: false

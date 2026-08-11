@@ -53,7 +53,8 @@ export function registrarRotasDeAuditoria(
         response: { 200: listaDeEventosResposta },
       },
       config: { rateLimit: LIMITE_LEITURA },
-      preHandler: [auth, exigirPermissao('audit:read')],
+      onRequest: auth,
+      preHandler: exigirPermissao('audit:read'),
     },
     (req, resp) => controller.listar(req, resp),
   );
@@ -69,7 +70,8 @@ export function registrarRotasDeAuditoria(
         response: { 200: eventoDetalheResposta },
       },
       config: { rateLimit: LIMITE_LEITURA },
-      preHandler: [auth, exigirPermissao('audit:read')],
+      onRequest: auth,
+      preHandler: exigirPermissao('audit:read'),
     },
     (req, resp) => controller.obter(req, resp),
   );
@@ -85,7 +87,8 @@ export function registrarRotasDeAuditoria(
         response: { 200: relatorioDeIntegridadeResposta },
       },
       config: { rateLimit: LIMITE_VERIFICACAO },
-      preHandler: [auth, exigirPermissao('audit:verify')],
+      onRequest: auth,
+      preHandler: exigirPermissao('audit:verify'),
     },
     (req, resp) => controller.verificar(req, resp),
   );
@@ -99,7 +102,8 @@ export function registrarRotasDeAuditoria(
         security: seguranca,
       },
       config: { rateLimit: LIMITE_LEITURA },
-      preHandler: [auth, exigirPermissao('audit:read')],
+      onRequest: auth,
+      preHandler: exigirPermissao('audit:read'),
     },
     (req, resp) => controller.recusarEscrita(req, resp),
   );

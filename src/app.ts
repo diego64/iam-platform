@@ -5,7 +5,12 @@
  * Regras: recebe a configuração e os serviços por injeção; nunca lê process.env, nunca
  *         abre socket e nunca conhece `pg` ou `mongodb`.
  */
-import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
+import Fastify, {
+  type FastifyError,
+  type FastifyInstance,
+  type FastifyReply,
+  type FastifyRequest,
+} from 'fastify';
 import fastifySwagger from '@fastify/swagger';
 import fastifySwaggerUi from '@fastify/swagger-ui';
 import fastifyRateLimit from '@fastify/rate-limit';
@@ -15,6 +20,12 @@ import type { ContadorDeRateLimit } from './shared/rate-limit/types.js';
 import fastifyHelmet from '@fastify/helmet';
 import fastifyCors from '@fastify/cors';
 import {
+  CABECALHOS_DA_DOCUMENTACAO,
+  CABECALHOS_DE_ERRO_SEM_ROTA,
+  CABECALHOS_DE_SEGURANCA,
+} from './shared/http/security-headers.js';
+import { registrarControleDeCache } from './shared/http/cache-control.js';
+import {
   jsonSchemaTransform,
   serializerCompiler,
   validatorCompiler,
@@ -23,7 +34,7 @@ import {
 import type { Env } from './config/env.js';
 import { montarProblema } from './shared/errors/problem-json.js';
 import { contextoDeTrace } from './shared/logger/index.js';
-import { registrarRotasDeHealth } from './modules/health/index.js';
+import { registrarRotaDeSecurityTxt, registrarRotasDeHealth } from './modules/health/index.js';
 import type { ServicoDeProntidao } from './modules/health/services/prontidao.service.js';
 import type { Telemetria } from './telemetry/sdk.js';
 import { obterInstrumentos, rotuloDeRota } from './telemetry/metricas.js';
@@ -51,6 +62,20 @@ import { registrarContextoDeRequisicao } from './plugins/request-context.js';
 import { registrarRotasDeChaves } from './modules/jwks/index.js';
 
 const TIPO_PROBLEM_JSON = 'application/problem+json';
+
+/** Prefixo da documentação interativa — só existe fora de produção. */
+const PREFIXO_DA_DOCUMENTACAO = '/docs';
+
+/**
+ * `true` para a raiz da documentação e o que está sob ela — e só.
+ *
+ * Comparação de prefixo solta (`startsWith('/docs')`) casaria também `/docs-interno` ou
+ * `/docsearch`, que herdariam em silêncio a política relaxada da UI. Degradação de segurança
+ * por acidente de nome não avisa: a rota responde normalmente, só com menos proteção.
+ */
+export function ehRotaDaDocumentacao(caminho: string): boolean {
+  return caminho === PREFIXO_DA_DOCUMENTACAO || caminho.startsWith(`${PREFIXO_DA_DOCUMENTACAO}/`);
+}
 
 /** Uma rota efetivamente registrada nesta instância. */
 export interface RotaRegistrada {
@@ -137,7 +162,11 @@ const ROTA_DE_TROCA_DE_SENHA = '/auth/password/change';
  *
  * `forgot`, `reset` e `policy` são públicas por definição: quem esqueceu a senha não tem
  * token para apresentar. Um hook valendo para o escopo inteiro fecharia as três, então o
- * preHandler decide pela rota.
+ * gancho decide pela rota.
+ *
+ * Em `onRequest`, antes da validação do corpo: recusa sem token não deve custar um parse, e
+ * um chamador anônimo não deve receber o erro de schema de uma rota autenticada — o formato
+ * esperado do corpo é informação sobre a superfície protegida.
  *
  * ponytail: uma comparação de caminho. Vira lista quando existir a segunda rota de senha
  * autenticada.
@@ -148,7 +177,7 @@ async function registrarModuloDeSenha(
   verificarAccessToken: VerificadorDeAccessToken,
 ): Promise<void> {
   await app.register((escopo, _opcoes, pronto) => {
-    escopo.addHook('preHandler', async (requisicao, resposta) => {
+    escopo.addHook('onRequest', async (requisicao, resposta) => {
       if (requisicao.routeOptions.url === ROTA_DE_TROCA_DE_SENHA) {
         await verificarAccessToken(requisicao, resposta);
       }
@@ -172,10 +201,67 @@ async function registrarModuloDeUsuarios(
   verificarAccessToken: VerificadorDeAccessToken,
 ): Promise<void> {
   await app.register((escopo, _opcoes, pronto) => {
-    escopo.addHook('preHandler', verificarAccessToken);
+    escopo.addHook('onRequest', verificarAccessToken);
     registrarRotasDeUsuario(escopo, deps);
     pronto();
   });
+}
+
+/**
+ * Traduz para problem+json os erros que o Fastify emite **antes** de haver rota: caminho
+ * longo demais, versão de cabeçalho inválida, corpo malformado no parser interno.
+ *
+ * Esses erros não passam pelo `setErrorHandler` — saem no formato do próprio framework,
+ * como `application/json`, fora do contrato da plataforma. No caso do caminho longo é pior
+ * que uma inconsistência de formato: o corpo default **ecoa de volta o caminho ofensivo
+ * inteiro**, devolvendo ao cliente a string que ele mesmo enviou.
+ */
+export function responderErroDeFramework(
+  erro: FastifyError,
+  requisicao: FastifyRequest,
+  resposta: FastifyReply,
+): void {
+  const status = erro.statusCode ?? 400;
+
+  /**
+   * Sem registro a borda fica muda: requisição malformada, caminho gigante e varredura de
+   * URL não deixam sinal em nível nenhum. É onde a sondagem chega primeiro, e é da ausência
+   * de sinal aqui que a detecção de abuso não tem como suspeitar.
+   *
+   * Só o código, o status e o método — nunca `err`. A mensagem e o stack destes erros
+   * **embutem a string recebida do cliente**: registrar o objeto inteiro devolveria ao log o
+   * mesmo caminho ofensivo que a resposta deixou de ecoar, e o log fica retido muito mais
+   * tempo que a requisição. O código já diz o que aconteceu; o valor não acrescenta nada
+   * que valha carregar.
+   */
+  const evento = {
+    evento: 'erro_de_framework',
+    codigo: erro.code,
+    status,
+    metodo: requisicao.method,
+  };
+
+  if (status >= 500) {
+    requisicao.log.error(evento, 'erro de framework antes do roteamento');
+    void resposta
+      .status(status)
+      .headers(CABECALHOS_DE_ERRO_SEM_ROTA)
+      .type(TIPO_PROBLEM_JSON)
+      // O mesmo tipo que o handler global usa acima de 500: um erro de servidor rotulado
+      // como erro de requisição manda o cliente procurar defeito no que ele enviou.
+      .send(montarProblema('internal-error', 'Erro interno', status));
+    return;
+  }
+
+  requisicao.log.warn(evento, 'requisição recusada antes do roteamento');
+  void resposta
+    .status(status)
+    // Este caminho não passa por gancho nenhum — nem `onRequest`, onde o plugin escreve os
+    // cabeçalhos, nem `onSend`, onde o controle de cache decide. Sem escrevê-los aqui, a
+    // resposta a uma requisição malformada sairia sem política de segurança alguma.
+    .headers(CABECALHOS_DE_ERRO_SEM_ROTA)
+    .type(TIPO_PROBLEM_JSON)
+    .send(montarProblema('request-error', 'Requisição inválida', status));
 }
 
 /** Prontidão degenerada: usada quando o app sobe sem dependências injetadas. */
@@ -229,6 +315,15 @@ export async function construirApp(
     // investigação — seriam os únicos sem trace_id.
     logger: { level: env.LOG_LEVEL, mixin: contextoDeTrace },
     trustProxy: hopsDeProxyConfiaveis(env),
+    // Sem estes quatro, o processo fica nos defaults do Fastify: 1 MB de corpo, nenhum
+    // timeout de requisição e 100 caracteres de parâmetro. O que falta ali é o teto de
+    // requisição — um cliente abre a conexão, envia um byte por vez e segura o worker
+    // enquanto quiser, sem nunca estourar limite nenhum.
+    bodyLimit: env.HTTP_BODY_LIMIT_BYTES,
+    requestTimeout: env.HTTP_REQUEST_TIMEOUT_MS,
+    keepAliveTimeout: env.HTTP_KEEP_ALIVE_TIMEOUT_MS,
+    routerOptions: { maxParamLength: env.HTTP_MAX_PARAM_LENGTH },
+    frameworkErrors: responderErroDeFramework,
   });
 
   app.setValidatorCompiler(validatorCompiler);
@@ -250,6 +345,24 @@ export async function construirApp(
     }
   });
 
+  /**
+   * Política relaxada só para a documentação, pela configuração por rota do próprio helmet.
+   *
+   * O caminho óbvio — registrar a UI num escopo com um helmet próprio — não funciona: o
+   * plugin é publicado com `fastify-plugin`, então um registro aninhado escapa do escopo e
+   * sobrescreve a configuração global em vez de conviver com ela. A configuração por rota é
+   * o mecanismo que o plugin oferece para exatamente isto, e não vaza: só as rotas que
+   * casam o prefixo recebem a sobreposição.
+   *
+   * Precisa estar aqui, antes do registro da UI: o gancho vale para as rotas declaradas
+   * depois dele.
+   */
+  app.addHook('onRoute', (opcoes) => {
+    if (ehRotaDaDocumentacao(opcoes.url)) {
+      opcoes.config = { ...opcoes.config, helmet: CABECALHOS_DA_DOCUMENTACAO };
+    }
+  });
+
   await app.register(fastifySwagger, {
     openapi: {
       info: { title: 'iam-platform', version: '0.1.0' },
@@ -262,12 +375,13 @@ export async function construirApp(
     transform: jsonSchemaTransform,
   });
 
-  // A UI (e o /docs/json que vem com ela) publica a superfície inteira da API sem
+  // A UI (e o `/docs/json` que vem com ela) publica a superfície inteira da API sem pedir
+  // credencial — em produção isso é um mapa entregue de graça, e por isso ela não sobe lá.
   // O @fastify/swagger acima continua registrado em todo ambiente: ele só constrói o
   // documento em memória, sem expor rota — é o que alimenta app.swagger() e o teste de
   // contrato.
   if (env.NODE_ENV !== 'production') {
-    await app.register(fastifySwaggerUi, { routePrefix: '/docs' });
+    await app.register(fastifySwaggerUi, { routePrefix: PREFIXO_DA_DOCUMENTACAO });
   }
 
   /**
@@ -302,7 +416,11 @@ export async function construirApp(
         }),
   });
 
-  await app.register(fastifyHelmet);
+  await app.register(fastifyHelmet, CABECALHOS_DE_SEGURANCA);
+
+  // Depois do plugin, antes das rotas: o gancho vale para toda resposta que ainda não
+  // tenha decidido o próprio cache.
+  registrarControleDeCache(app);
 
   // Origem fechada por default. `origin: false` não emite cabeçalho de liberação nenhum,
   // então o navegador barra qualquer página que tente chamar esta API — que é o estado
@@ -333,6 +451,15 @@ export async function construirApp(
     }
 
     const status = erro.statusCode ?? 500;
+
+    // O corpo grande demais é recusado pelo parser e chega aqui já com 413. Contar é o que
+    // separa "o teto está protegendo" de "o teto está apertado demais e mordendo tráfego
+    // legítimo" — sem a série, um teto errado aparece só como erro do lado do cliente.
+    if (status === 413 && dependencias.telemetria?.exportadorPrometheus !== undefined) {
+      obterInstrumentos(env.GIT_COMMIT).registrarCorpoRecusado(
+        rotuloDeRota(requisicao.routeOptions.url),
+      );
+    }
 
     if (status >= 500) {
       requisicao.log.error({ err: erro }, 'erro não tratado');
@@ -370,6 +497,8 @@ export async function construirApp(
   registrarRotasDeHealth(app, {
     prontidao: dependencias.prontidao ?? prontidaoIndisponivel(),
   });
+
+  registrarRotaDeSecurityTxt(app);
 
   if (dependencias.jwks !== undefined) {
     registrarRotasDeJwks(app, { jwks: dependencias.jwks });

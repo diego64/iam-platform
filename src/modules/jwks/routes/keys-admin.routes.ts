@@ -53,7 +53,8 @@ export function registrarRotasDeChaves(
         querystring: listarChavesQuery,
         response: { 200: respostaListaDeChaves },
       },
-      preHandler: [auth, exigirPermissao('keys:read')],
+      onRequest: auth,
+      preHandler: exigirPermissao('keys:read'),
     },
     (req, resp) => controller.listar(req, resp),
   );
@@ -67,7 +68,8 @@ export function registrarRotasDeChaves(
         security: seguranca,
         response: { 200: respostaChavePreparada, 201: respostaChavePreparada },
       },
-      preHandler: [auth, exigirPermissao('keys:write')],
+      onRequest: auth,
+      preHandler: exigirPermissao('keys:write'),
     },
     (req, resp) => controller.preparar(req, resp),
   );
@@ -82,7 +84,8 @@ export function registrarRotasDeChaves(
         body: rotacionarBody,
         response: { 200: respostaRotacao },
       },
-      preHandler: [auth, exigirPermissao('keys:write')],
+      onRequest: auth,
+      preHandler: exigirPermissao('keys:write'),
     },
     (req, resp) => controller.rotacionar(req, resp),
   );
@@ -98,7 +101,8 @@ export function registrarRotasDeChaves(
         body: revogarBody,
         response: { 200: respostaRevogacao },
       },
-      preHandler: [auth, exigirPapel('superadmin')],
+      onRequest: auth,
+      preHandler: exigirPapel('superadmin'),
     },
     (req, resp) => controller.revogar(req, resp),
   );

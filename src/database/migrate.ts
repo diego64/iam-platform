@@ -7,7 +7,7 @@
  */
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { carregarEnv } from '../config/env.js';
 import { criarLogger } from '../shared/logger/index.js';
@@ -16,13 +16,13 @@ import { criarPoolPostgres } from './postgres/connection.js';
 const PASTA_DE_MIGRATIONS = join(dirname(fileURLToPath(import.meta.url)), 'migrations');
 
 /** Lista os arquivos .sql em ordem lexicográfica — o prefixo numérico (0001_) define a ordem. */
-function listarMigrations(): string[] {
+export function listarMigrations(): string[] {
   return readdirSync(PASTA_DE_MIGRATIONS)
     .filter((nome) => nome.endsWith('.sql'))
     .sort();
 }
 
-async function migrar(dryRun: boolean): Promise<void> {
+export async function migrar(dryRun: boolean): Promise<void> {
   const env = carregarEnv();
   const logger = criarLogger({ nivel: env.LOG_LEVEL });
   const pool = criarPoolPostgres(env);
@@ -81,8 +81,23 @@ async function migrar(dryRun: boolean): Promise<void> {
   }
 }
 
+/**
+ * `true` quando este arquivo é o que o Node foi mandado executar.
+ *
+ * Sem a checagem, importar o módulo — que é o que um teste faz — dispara a migração inteira
+ * como efeito colateral do import, contra o banco que estiver configurado no ambiente. Era
+ * por isso que este arquivo tinha zero cobertura apesar de rodar no `start` de produção:
+ * ninguém conseguia importá-lo em segurança.
+ */
+function executadoDiretamente(): boolean {
+  const entrada = process.argv[1];
+  return entrada !== undefined && import.meta.url === pathToFileURL(entrada).href;
+}
+
 // Falha-fecha: erro na migração ⇒ exit 1, para o preDeployCommand barrar a troca de tráfego.
-migrar(process.argv.includes('--dry-run')).catch((erro: unknown) => {
-  criarLogger().fatal({ err: erro }, 'falha ao aplicar migrations');
-  process.exit(1);
-});
+if (executadoDiretamente()) {
+  migrar(process.argv.includes('--dry-run')).catch((erro: unknown) => {
+    criarLogger().fatal({ err: erro }, 'falha ao aplicar migrations');
+    process.exit(1);
+  });
+}

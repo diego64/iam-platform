@@ -2,7 +2,7 @@
  * Responsabilidade: registrar as 3 rotas de autenticação com validação Zod e tags OpenAPI.
  * Regras: recebe o AuthService e o verificador de token por injeção; não conhece banco.
  * `/auth/login` é público e com rate limit; `/auth/logout` e `/auth/me` exigem Bearer e
- * passam pelo preHandler que popula `request.usuario`.
+ * passam pelo gancho de `onRequest` que popula `request.usuario`.
  */
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
@@ -60,7 +60,7 @@ export function registrarRotasDeAuth(app: FastifyInstance, deps: DependenciasDas
         security: seguranca,
         body: logoutBody,
       },
-      preHandler: deps.verificarAccessToken,
+      onRequest: deps.verificarAccessToken,
     },
     (requisicao, resposta) => controller.logout(requisicao, resposta),
   );
@@ -74,7 +74,7 @@ export function registrarRotasDeAuth(app: FastifyInstance, deps: DependenciasDas
         security: seguranca,
         response: { 200: respostaMe },
       },
-      preHandler: deps.verificarAccessToken,
+      onRequest: deps.verificarAccessToken,
     },
     (requisicao, resposta) => controller.eu(requisicao, resposta),
   );

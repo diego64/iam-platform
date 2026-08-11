@@ -73,7 +73,8 @@ export function registrarRotasDeClientes(
         body: criarClienteBody,
         response: { 201: respostaClienteCriado },
       },
-      preHandler: [auth, soSuperadmin],
+      onRequest: auth,
+      preHandler: soSuperadmin,
     },
     (req, resp) => controller.criar(req, resp),
   );
@@ -88,7 +89,8 @@ export function registrarRotasDeClientes(
         querystring: listarClientesQuery,
         response: { 200: respostaListaDeClientes },
       },
-      preHandler: [auth, exigirPermissao('clients:read')],
+      onRequest: auth,
+      preHandler: exigirPermissao('clients:read'),
     },
     (req, resp) => controller.listar(req, resp),
   );
@@ -103,7 +105,8 @@ export function registrarRotasDeClientes(
         params: idParams,
         response: { 200: clienteDto },
       },
-      preHandler: [auth, exigirPermissao('clients:read')],
+      onRequest: auth,
+      preHandler: exigirPermissao('clients:read'),
     },
     (req, resp) => controller.obter(req, resp),
   );
@@ -119,7 +122,8 @@ export function registrarRotasDeClientes(
         body: atualizarClienteBody,
         response: { 200: clienteDto },
       },
-      preHandler: [auth, autoridadeDoPatch],
+      onRequest: auth,
+      preHandler: autoridadeDoPatch,
     },
     (req, resp) => controller.atualizar(req, resp),
   );
@@ -133,7 +137,8 @@ export function registrarRotasDeClientes(
         security: seguranca,
         params: idParams,
       },
-      preHandler: [auth, exigirPermissao('clients:delete')],
+      onRequest: auth,
+      preHandler: exigirPermissao('clients:delete'),
     },
     (req, resp) => controller.remover(req, resp),
   );
@@ -149,7 +154,8 @@ export function registrarRotasDeClientes(
         body: rotacionarSegredoBody,
         response: { 200: respostaSegredoRotacionado },
       },
-      preHandler: [auth, podeEscrever],
+      onRequest: auth,
+      preHandler: podeEscrever,
     },
     (req, resp) => controller.rotacionarSegredo(req, resp),
   );
@@ -163,7 +169,8 @@ export function registrarRotasDeClientes(
         security: seguranca,
         params: idParams,
       },
-      preHandler: [auth, podeEscrever],
+      onRequest: auth,
+      preHandler: podeEscrever,
     },
     (req, resp) => controller.revogarSegredoAnterior(req, resp),
   );

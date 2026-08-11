@@ -11,7 +11,7 @@
  *    métodos deixaria de acontecer — sem erro, sem span, sem aviso.
  */
 import { createRequire } from 'node:module';
-import { diag, DiagLogLevel } from '@opentelemetry/api';
+import { diag, DiagLogLevel, metrics } from '@opentelemetry/api';
 import { NodeSDK, resources, tracing } from '@opentelemetry/sdk-node';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
@@ -80,22 +80,53 @@ function agregarFalhasDeExportacao(logger: Logger): () => void {
 }
 
 /**
- * Atributos que a instrumentação automática acrescenta e a SPEC proíbe.
+ * Atributos que a instrumentação automática acrescenta e não podem sair do processo.
  *
  * As instrumentações de `pg` e `mongodb` publicam `db.connection_string` — que carrega
  * host, porta e nome do banco — e `db.user`. Juntos, descrevem a topologia interna para
  * qualquer um com acesso ao backend de traces, e nada disso é necessário para responder
  * "por que esta requisição demorou".
+ *
+ * A instrumentação de HTTP publica a URL de quatro maneiras, e todas carregam a query
+ * string. Hoje nenhuma rota desta API lê parâmetro de query — o token de troca de senha
+ * chega no corpo, e não existe fluxo de autorização com `code` na URL. A remoção é defesa
+ * em profundidade por dois motivos concretos, não por um vazamento em curso:
+ *
+ *  1. O que trafega de fato nesses atributos é o **valor** do parâmetro de caminho — o UUID
+ *     do usuário em `/users/{id}`. Identificador de pessoa retido e indexado num backend de
+ *     traces por meses é dado pessoal onde ninguém foi procurar.
+ *  2. A primeira rota que aceitar query vazaria em silêncio. Ligar a proteção depois do
+ *     fato exige lembrar dela no momento certo; ligada agora, ela já está lá.
+ *
+ * `url.path` fica de fora da lista de propósito. Ele não carrega query, e é a única
+ * informação de caminho que sobra numa requisição **não roteada** — 404 e 414 não têm
+ * `http.route`, e sem `url.path` o span diria que houve um 404 sem dizer para quê.
  */
-const ATRIBUTOS_PROIBIDOS = ['db.connection_string', 'db.user'] as const;
+const ATRIBUTOS_PROIBIDOS = [
+  'db.connection_string',
+  'db.user',
+  'url.full',
+  'url.query',
+  'http.target',
+  'http.url',
+] as const;
 
 /**
  * Remove os atributos proibidos antes de o span sair do processo.
  *
  * Registrado ANTES do processor de lote: o lote guarda o span por referência e serializa
  * depois, então a limpeza precisa acontecer no `onEnd` que roda primeiro.
+ *
+ * Cada remoção é contada. Se o contador zerar depois de uma atualização do pacote de
+ * instrumentação, é porque o atributo mudou de nome — e o vazamento voltou sem que nenhum
+ * teste ou alerta tivesse mudado de cor.
  */
-function limparAtributosSensiveis(): tracing.SpanProcessor {
+export function limparAtributosSensiveis(): tracing.SpanProcessor {
+  // Com a telemetria desligada este é o meter no-op do OTel, e contar não custa nada.
+  const removidos = metrics.getMeter('iam-platform').createCounter('iam_span_attributes_scrubbed', {
+    description: 'Atributos removidos de spans antes da exportação',
+  });
+
   return {
     onStart: () => undefined,
     onEnd: (span) => {
@@ -103,6 +134,7 @@ function limparAtributosSensiveis(): tracing.SpanProcessor {
         if (chave in span.attributes) {
           // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
           delete (span.attributes as Record<string, unknown>)[chave];
+          removidos.add(1, { atributo: chave });
         }
       }
     },

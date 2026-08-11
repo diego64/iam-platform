@@ -571,3 +571,54 @@ describe('carregarEnv — notificações (SPEC 019)', () => {
     expect(JSON.stringify(erro.variaveis)).not.toContain('nao-e-email');
   });
 });
+
+describe('carregarEnv — limites de recurso do servidor HTTP (SPEC 024)', () => {
+  it('aplica os defaults dos quatro tetos', () => {
+    const env = carregarEnv(fonteValida());
+
+    expect(env.HTTP_BODY_LIMIT_BYTES).toBe(65_536);
+    expect(env.HTTP_REQUEST_TIMEOUT_MS).toBe(30_000);
+    expect(env.HTTP_KEEP_ALIVE_TIMEOUT_MS).toBe(72_000);
+    expect(env.HTTP_MAX_PARAM_LENGTH).toBe(128);
+  });
+
+  it('coage os valores informados como texto', () => {
+    const env = carregarEnv(
+      fonteValida({
+        HTTP_BODY_LIMIT_BYTES: '131072',
+        HTTP_REQUEST_TIMEOUT_MS: '15000',
+        HTTP_KEEP_ALIVE_TIMEOUT_MS: '90000',
+        HTTP_MAX_PARAM_LENGTH: '256',
+      }),
+    );
+
+    expect(env.HTTP_BODY_LIMIT_BYTES).toBe(131_072);
+    expect(env.HTTP_REQUEST_TIMEOUT_MS).toBe(15_000);
+    expect(env.HTTP_KEEP_ALIVE_TIMEOUT_MS).toBe(90_000);
+    expect(env.HTTP_MAX_PARAM_LENGTH).toBe(256);
+  });
+
+  it('recusa corpo menor que 1 KB — abaixo disso nem o login passaria', () => {
+    const erro = capturarErro(fonteValida({ HTTP_BODY_LIMIT_BYTES: '512' }));
+
+    expect(erro.variaveis.map((v) => v.nome)).toContain('HTTP_BODY_LIMIT_BYTES');
+  });
+
+  it('recusa corpo acima de 10 MB — o teto do teto', () => {
+    const erro = capturarErro(fonteValida({ HTTP_BODY_LIMIT_BYTES: '20971520' }));
+
+    expect(erro.variaveis.map((v) => v.nome)).toContain('HTTP_BODY_LIMIT_BYTES');
+  });
+
+  it('recusa comprimento de parâmetro menor que um UUID', () => {
+    const erro = capturarErro(fonteValida({ HTTP_MAX_PARAM_LENGTH: '20' }));
+
+    expect(erro.variaveis.map((v) => v.nome)).toContain('HTTP_MAX_PARAM_LENGTH');
+  });
+
+  it('recusa timeout de requisição fora da faixa', () => {
+    const erro = capturarErro(fonteValida({ HTTP_REQUEST_TIMEOUT_MS: '500' }));
+
+    expect(erro.variaveis.map((v) => v.nome)).toContain('HTTP_REQUEST_TIMEOUT_MS');
+  });
+});

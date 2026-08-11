@@ -43,7 +43,8 @@ export function registrarRotasDeNotificacoes(
         response: { 200: resultadoDoTeste },
       },
       config: { rateLimit: LIMITE_TESTE },
-      preHandler: [deps.verificarAccessToken, deps.guards.exigirPermissao('notifications:send')],
+      onRequest: deps.verificarAccessToken,
+      preHandler: deps.guards.exigirPermissao('notifications:send'),
     },
     (requisicao, resposta) => controller.testar(requisicao, resposta),
   );

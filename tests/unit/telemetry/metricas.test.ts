@@ -109,6 +109,26 @@ describe('métricas de prontidão', () => {
   });
 });
 
+describe('corpo recusado por exceder o teto', () => {
+  it('conta por rota, com o nome do contrato', async () => {
+    instrumentos.registrarCorpoRecusado('/auth/login');
+
+    const [linha] = series(await exposicao(), 'iam_http_body_limit_exceeded_total');
+
+    expect(linha).toContain('route="/auth/login"');
+  });
+
+  it('usa o template da rota como rótulo, nunca o caminho recebido', async () => {
+    // Mesmo motivo do histograma de requisição: o caminho concreto criaria uma série por
+    // identificador e derrubaria o Prometheus sob a própria cardinalidade.
+    instrumentos.registrarCorpoRecusado(rotuloDeRota('/users/:id'));
+
+    const linhas = series(await exposicao(), 'iam_http_body_limit_exceeded_total');
+
+    expect(linhas.some((l) => l.includes('route="/users/:id"'))).toBe(true);
+  });
+});
+
 describe('rotuloDeRota — guarda de cardinalidade', () => {
   it('devolve o template quando a rota casou', () => {
     expect(rotuloDeRota('/users/:id')).toBe('/users/:id');

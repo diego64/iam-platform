@@ -351,6 +351,28 @@ export const esquemaEnv = z.object({
     )
     .refine((origens) => origens.every(ehOrigemValida)),
 
+  // Maior corpo que o processo aceita ler. O maior corpo legítimo da API é uma política de
+  // autorização por atributo; 64 KB dá duas ordens de grandeza de folga sobre o real e
+  // recusa upload acidental antes de qualquer parse. O mínimo de 1 KB existe porque abaixo
+  // disso nem o login passaria, e o boot falhando é melhor que toda rota respondendo 413.
+  HTTP_BODY_LIMIT_BYTES: z.coerce.number().int().min(1_024).max(10_485_760).default(65_536),
+
+  // Teto para a requisição inteira chegar. É o que fecha o cliente que abre a conexão e
+  // goteja um byte por vez para segurar o worker indefinidamente.
+  HTTP_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(300_000).default(30_000),
+
+  // Quanto tempo a conexão ociosa sobrevive esperando a próxima requisição.
+  //
+  // Precisa ser MAIOR que o tempo ocioso do proxy que fica à frente. Menor, a corrida é
+  // esta: o proxy escolhe uma conexão do pool no instante em que o Node a está fechando, e
+  // o cliente recebe um 502 que não se reproduz e não aparece em log nenhum do processo.
+  HTTP_KEEP_ALIVE_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(300_000).default(72_000),
+
+  // Comprimento máximo de um parâmetro de caminho. Todo `:id` desta API é UUID (36
+  // caracteres); 128 acomoda o dobro com folga e faz o roteador recusar caminho de
+  // kilobytes antes de tentar casar rota.
+  HTTP_MAX_PARAM_LENGTH: z.coerce.number().int().min(36).max(4_096).default(128),
+
   // Segredo que entra no hash do e-mail quando a operação não tem ator identificado (login
   // de conta inexistente). Sem ele, o hash é reversível por dicionário de e-mails, que é
   // exatamente o que a pista existe para evitar. Opcional no schema pelo mesmo motivo da

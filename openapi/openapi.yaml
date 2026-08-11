@@ -19,6 +19,10 @@ tags:
     description: Exposição de métricas para raspagem pelo Prometheus.
   - name: jwks
     description: Publicação das chaves públicas de verificação (JWK Set).
+  - name: well-known
+    description: >-
+      Documentos estáticos sobre a plataforma, não sobre identidade nenhuma. Públicos por
+      definição — quem precisa deles ainda não tem credencial.
   - name: keys
     description: >-
       Administração das chaves de assinatura. A rotação acontece em duas fases separadas no
@@ -1421,6 +1425,41 @@ paths:
                     kid: 0193b6e2-7f00-7cd1-9a3e-2b7c9f0a1d42
                     use: sig
                     alg: EdDSA
+  /.well-known/security.txt:
+    get:
+      tags: [well-known]
+      summary: Canal de divulgação de vulnerabilidade (RFC 9116)
+      description: >
+        Publica na superfície HTTP como reportar uma falha de forma privada. A política em
+        si vive no SECURITY.md do repositório, visível apenas para quem já chegou ao código;
+        quem encontra a falha costuma chegar pela API. O campo Expires é calculado a partir
+        do momento da resposta — a RFC recusa data no passado, e um arquivo estático com
+        data fixa deixa de valer sozinho, em silêncio.
+      operationId: securityTxt
+      security: []
+      responses:
+        '200':
+          description: Documento no formato da RFC 9116
+          headers:
+            Cache-Control:
+              description: Conteúdo público e estável; cacheável por um dia.
+              schema:
+                type: string
+                example: public, max-age=86400
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: |
+                Contact: https://github.com/diego64/iam-platform/security/advisories/new
+                Expires: 2027-08-10T00:00:00.000Z
+                Preferred-Languages: pt-BR, en
+                Policy: https://github.com/diego64/iam-platform/blob/main/SECURITY.md
+        '429':
+          description: Limite de tentativas excedido
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
   /auth/login:
     post:
       tags: [auth]

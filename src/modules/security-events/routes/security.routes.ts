@@ -30,7 +30,8 @@ export function registrarRotasDeSeguranca(
   const tipado = app.withTypeProvider<ZodTypeProvider>();
   const controller = criarControllerDeSeguranca(deps);
   const seguranca = [{ BearerAuth: [] }];
-  const exigir = [deps.verificarAccessToken, deps.guards.exigirPermissao('security:read')];
+  const auth = deps.verificarAccessToken;
+  const exigir = deps.guards.exigirPermissao('security:read');
 
   tipado.get(
     '/security/events',
@@ -42,6 +43,7 @@ export function registrarRotasDeSeguranca(
         querystring: consultaDeEventos,
         response: { 200: listaDeEventos },
       },
+      onRequest: auth,
       preHandler: exigir,
     },
     (requisicao, resposta) => controller.listar(requisicao, resposta),
@@ -57,6 +59,7 @@ export function registrarRotasDeSeguranca(
         params: parametroDeEvento,
         response: { 200: eventoDeSegurancaDto },
       },
+      onRequest: auth,
       preHandler: exigir,
     },
     (requisicao, resposta) => controller.obter(requisicao, resposta),
