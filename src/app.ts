@@ -162,7 +162,11 @@ const ROTA_DE_TROCA_DE_SENHA = '/auth/password/change';
  *
  * `forgot`, `reset` e `policy` são públicas por definição: quem esqueceu a senha não tem
  * token para apresentar. Um hook valendo para o escopo inteiro fecharia as três, então o
- * preHandler decide pela rota.
+ * gancho decide pela rota.
+ *
+ * Em `onRequest`, antes da validação do corpo: recusa sem token não deve custar um parse, e
+ * um chamador anônimo não deve receber o erro de schema de uma rota autenticada — o formato
+ * esperado do corpo é informação sobre a superfície protegida.
  *
  * ponytail: uma comparação de caminho. Vira lista quando existir a segunda rota de senha
  * autenticada.
@@ -173,7 +177,7 @@ async function registrarModuloDeSenha(
   verificarAccessToken: VerificadorDeAccessToken,
 ): Promise<void> {
   await app.register((escopo, _opcoes, pronto) => {
-    escopo.addHook('preHandler', async (requisicao, resposta) => {
+    escopo.addHook('onRequest', async (requisicao, resposta) => {
       if (requisicao.routeOptions.url === ROTA_DE_TROCA_DE_SENHA) {
         await verificarAccessToken(requisicao, resposta);
       }
@@ -197,7 +201,7 @@ async function registrarModuloDeUsuarios(
   verificarAccessToken: VerificadorDeAccessToken,
 ): Promise<void> {
   await app.register((escopo, _opcoes, pronto) => {
-    escopo.addHook('preHandler', verificarAccessToken);
+    escopo.addHook('onRequest', verificarAccessToken);
     registrarRotasDeUsuario(escopo, deps);
     pronto();
   });

@@ -50,7 +50,8 @@ export function registrarRotasDeAbac(app: FastifyInstance, deps: DependenciasDas
         body: criarPoliticaBody,
         response: { 201: respostaPolitica },
       },
-      preHandler: [auth, exigirPermissao('policies:write')],
+      onRequest: auth,
+      preHandler: exigirPermissao('policies:write'),
     },
     (req, resp) => controller.criarPolitica(req, resp),
   );
@@ -65,7 +66,8 @@ export function registrarRotasDeAbac(app: FastifyInstance, deps: DependenciasDas
         querystring: listarPoliticasQuery,
         response: { 200: respostaListaPoliticas },
       },
-      preHandler: [auth, exigirPermissao('policies:read')],
+      onRequest: auth,
+      preHandler: exigirPermissao('policies:read'),
     },
     (req, resp) => controller.listarPoliticas(req, resp),
   );
@@ -80,7 +82,8 @@ export function registrarRotasDeAbac(app: FastifyInstance, deps: DependenciasDas
         params: idParams,
         response: { 200: respostaPoliticaDetalhe },
       },
-      preHandler: [auth, exigirPermissao('policies:read')],
+      onRequest: auth,
+      preHandler: exigirPermissao('policies:read'),
     },
     (req, resp) => controller.obterPolitica(req, resp),
   );
@@ -96,7 +99,8 @@ export function registrarRotasDeAbac(app: FastifyInstance, deps: DependenciasDas
         body: atualizarPoliticaBody,
         response: { 200: respostaPolitica },
       },
-      preHandler: [auth, exigirPermissao('policies:write')],
+      onRequest: auth,
+      preHandler: exigirPermissao('policies:write'),
     },
     (req, resp) => controller.atualizarPolitica(req, resp),
   );
@@ -110,7 +114,8 @@ export function registrarRotasDeAbac(app: FastifyInstance, deps: DependenciasDas
         security: seguranca,
         params: idParams,
       },
-      preHandler: [auth, exigirPermissao('policies:delete')],
+      onRequest: auth,
+      preHandler: exigirPermissao('policies:delete'),
     },
     (req, resp) => controller.removerPolitica(req, resp),
   );
@@ -126,7 +131,8 @@ export function registrarRotasDeAbac(app: FastifyInstance, deps: DependenciasDas
         body: avaliarBody,
         response: { 200: respostaDecisao },
       },
-      preHandler: [auth, exigirPermissao('policies:read')],
+      onRequest: auth,
+      preHandler: exigirPermissao('policies:read'),
     },
     (req, resp) => controller.avaliar(req, resp),
   );

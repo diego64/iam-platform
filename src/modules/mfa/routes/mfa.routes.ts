@@ -50,7 +50,7 @@ export async function registrarRotasDeMfa(
   deps: DependenciasDasRotasDeMfa,
 ): Promise<void> {
   await app.register((escopo, _opcoes, pronto) => {
-    escopo.addHook('preHandler', async (requisicao, resposta) => {
+    escopo.addHook('onRequest', async (requisicao, resposta) => {
       if (requisicao.routeOptions.url !== ROTA_DE_VERIFICACAO) {
         await deps.verificarAccessToken(requisicao, resposta);
       }
